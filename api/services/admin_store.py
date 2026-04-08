@@ -23,7 +23,7 @@ RATE_LIMIT_PATH = DATA_DIR / "rate-limits.json"
 _lock = threading.Lock()
 
 DEFAULT_CONFIG = {
-    "admin_password_hash": hashlib.sha256(b"stegu2024").hexdigest(),
+    "admin_password_hash": hashlib.sha256(b"stegu").hexdigest(),
     "daily_generation_limit": 50,
     "watermark_enabled": False,
     "watermark_opacity": 0.3,
