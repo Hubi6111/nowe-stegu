@@ -1,0 +1,50 @@
+@import "tailwindcss";
+
+::selection {
+  background-color: rgb(160 27 27 / 0.18);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to   { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.animate-fade-in     { animation: fade-in 0.4s ease-out both; }
+.animate-fade-in-up  { animation: fade-in-up 0.5s ease-out both; }
+.animate-scale-in    { animation: scale-in 0.35s ease-out both; }
+.animate-shimmer {
+  background: linear-gradient(90deg, #f5f5f0 25%, #e7e5e0 50%, #f5f5f0 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+.animate-spin-slow { animation: spin-slow 3s linear infinite; }
+
+.stegu-gradient {
+  background: linear-gradient(135deg, #1a1a1a 0%, #2d1515 40%, #3d1a1a 100%);
+}
+.stegu-accent { color: #A01B1B; }
+.stegu-accent-bg { background-color: #A01B1B; }

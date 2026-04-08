@@ -1,0 +1,10 @@
+{
+  "name": "Monsanto 1",
+  "moduleWidthMm": 245,
+  "moduleHeightMm": 80,
+  "jointMm": 10,
+  "layoutType": "running-bond",
+  "offsetRatio": 0.5,
+  "textureScaleMultiplier": 1.0,
+  "albedoBrickCourses": 8
+}

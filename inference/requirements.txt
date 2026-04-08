@@ -1,0 +1,18 @@
+fastapi>=0.115.0,<1.0.0
+uvicorn[standard]>=0.34.0,<1.0.0
+python-multipart>=0.0.9
+pillow>=10.0.0
+numpy>=1.24.0
+
+# PyTorch — macOS universal (CPU + MPS for Apple Silicon)
+torch>=2.2.0
+torchvision>=0.17.0
+
+# OneFormer semantic segmentation
+transformers>=4.40.0
+scipy>=1.10.0
+
+# SAM 2 — install separately if needed:
+#   pip install git+https://github.com/facebookresearch/sam2.git
+# or if available on PyPI:
+#   pip install sam-2

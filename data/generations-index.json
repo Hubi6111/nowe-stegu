@@ -1,0 +1,86 @@
+[
+  {
+    "id": "20260408-024148-d12d6f",
+    "timestamp": "2026-04-08 02:41:48",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.34,
+      "gemini_render": 19.7,
+      "total": 20.13
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260408-023613-ce38da",
+    "timestamp": "2026-04-08 02:36:13",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.23,
+      "gemini_render": 67.68,
+      "total": 67.92
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260408-023441-22816f",
+    "timestamp": "2026-04-08 02:34:41",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.23,
+      "gemini_render": 25.87,
+      "total": 26.13
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260408-013136-7c51e6",
+    "timestamp": "2026-04-08 01:31:36",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.47,
+      "gemini_render": 46.36,
+      "total": 46.86
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260408-013033-3aed49",
+    "timestamp": "2026-04-08 01:30:33",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.49,
+      "gemini_render": 37.49,
+      "total": 38.02
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260408-012531-c9c88b",
+    "timestamp": "2026-04-08 01:25:31",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.41,
+      "gemini_render": 35.96,
+      "total": 36.42
+    },
+    "has_image": true
+  }
+]

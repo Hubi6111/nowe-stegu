@@ -1,0 +1,27 @@
+# Vercel
+.vercel
+
+# Python
+api/.venv/
+inference/.venv/
+__pycache__/
+*.pyc
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Data (user uploads, outputs, model weights)
+data/uploads/*
+data/outputs/*
+data/masks/*
+data/model-cache/*
+!data/**/.gitkeep
+
+# Environment
+.env
+.env.local
+frontend/.env.local
+
+# PID files
+.pid-*
