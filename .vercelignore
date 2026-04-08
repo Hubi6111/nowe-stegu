@@ -1,0 +1,8 @@
+api/
+inference/
+scripts/
+data/
+docs/
+*.sh
+*.command
+Makefile
