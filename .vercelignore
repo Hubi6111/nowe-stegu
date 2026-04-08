@@ -1,8 +1,8 @@
-api/
-inference/
-scripts/
-data/
-docs/
-*.sh
-*.command
+/api
+/inference
+/scripts
+/data
+/docs
+run.sh
+run.command
 Makefile
