@@ -297,102 +297,50 @@ function buildRenderPrompt(
   scaleReport: ScaleReport,
   sceneDims: SceneDimensions,
 ): string {
-  const moduleH = scaleReport.brickBodyHeightMm;
-  const moduleW = scaleReport.brickBodyWidthMm;
-  const joint = scaleReport.jointMm;
   const layout = String(meta.layoutType || "running-bond");
   const isBrick = layout === "running-bond" || layout === "stretcher-bond";
-  const materialType = isBrick ? "decorative brick cladding" : "decorative wall panel";
 
-  const courseH = moduleH + joint;
-  const bricksNextToDoor = Math.round(2000 / courseH);
-  const bricksFullWall = Math.round((sceneDims.ceilingHeightCm || 270) * 10 / courseH);
+  return `You are a photorealistic compositing engine. You blend a pre-tiled wall texture into a room photo so the result looks like a real renovation photograph.
 
-  const refObjectsDesc = sceneDims.referenceObjects.length > 0
-    ? sceneDims.referenceObjects.map(r => `  • ${r.name}: ~${r.estimatedSizeCm} cm (${r.confidence} confidence)`).join("\n")
-    : "  • No specific reference objects detected — using standard room proportions";
+YOU RECEIVE 4 IMAGES:
+1. ORIGINAL — unmodified room photo (your lighting/perspective reference)
+2. COMPOSITE — the room with the EXACT product texture already tiled on the wall at correct scale
+3. MASK — ORIGINAL with ORANGE overlay showing the wall area
+4. TEXTURE TILE — the actual "${productName}" product (reference for exact color/pattern)
 
-  const dimBlock = isBrick
-    ? `PRODUCT: ${materialType} — "${productName}"
-  • Single brick body: ${moduleW} mm wide × ${moduleH} mm tall (${(moduleW / 10).toFixed(1)} × ${(moduleH / 10).toFixed(1)} cm)
-  • Mortar joint thickness: ${joint} mm (${(joint / 10).toFixed(1)} cm)
-  • One course height (brick + mortar): ${courseH} mm (${(courseH / 10).toFixed(1)} cm)
-  • Brick aspect ratio: ${(moduleW / moduleH).toFixed(1)}:1 (each brick is ${(moduleW / moduleH).toFixed(1)}× wider than tall)`
-    : `PRODUCT: ${materialType} — "${productName}"
-  • Single panel: ${moduleW} mm wide × ${moduleH} mm tall (${(moduleW / 10).toFixed(1)} × ${(moduleH / 10).toFixed(1)} cm)
-  • Gap between panels: ${joint} mm`;
+YOUR TASK — STRICTLY:
+Take image 2 (COMPOSITE) as your starting point. The texture pattern, colors, brick layout, mortar lines, tile count, and scale in the COMPOSITE are already PERFECT and FINAL. DO NOT redraw, reimagine, or regenerate any part of the texture. Your ONLY job is to make the COMPOSITE blend seamlessly into the room by adding:
 
-  return `You are an expert photorealistic interior/exterior rendering engine. Your #1 priority: PHYSICALLY CORRECT BRICK/TILE DIMENSIONS. The textured wall must be indistinguishable from a real renovation photograph.
+1. LIGHTING MATCH — Study image 1 (ORIGINAL). Match its light direction, color temperature, exposure, and shadows. Apply consistent lighting onto the textured wall so it feels lit by the same light source as the rest of the room.
 
-YOU RECEIVE FOUR IMAGES (in order):
-  1. ORIGINAL — the unmodified room/building photo
-  2. COMPOSITE — room with texture algorithmically placed at calculated real-world scale
-  3. MASK OVERLAY — ORIGINAL with ORANGE highlight = user's wall selection
-  4. PRODUCT TEXTURE TILE — the real decorative material to apply
+2. SURFACE DEPTH — Add subtle ${isBrick ? "brick relief: slight highlight on top edges, shadow on bottom edges of individual bricks, recessed mortar joints with micro-shadows" : "panel relief: subtle edge shadows between panels"}. Keep this VERY subtle — real ${isBrick ? "brick cladding" : "wall panels"} on a wall has only millimeters of depth.
 
-═══ WALL DIMENSIONS (AI-estimated from reference objects) ═══
-Scene type: ${sceneDims.sceneType}
-Highlighted wall area: ~${sceneDims.wallHeightCm} cm tall × ~${sceneDims.wallWidthCm} cm wide
-${sceneDims.ceilingHeightCm ? `Ceiling height: ~${sceneDims.ceilingHeightCm} cm` : ""}
-Dimension confidence: ${sceneDims.confidence}
-Reference objects used:
-${refObjectsDesc}
+3. EDGE BLENDING — Where the texture meets non-textured areas (ceiling, floor, other walls, furniture), blend naturally. Soften the boundary so it doesn't look cut-and-pasted.
 
-═══ PRODUCT PHYSICAL DIMENSIONS ═══
-${dimBlock}
+4. PERSPECTIVE — If the wall is at an angle to the camera, apply gentle perspective foreshortening to the texture so ${isBrick ? "mortar lines converge toward vanishing points" : "panel edges follow the wall plane"}.
 
-═══ CRITICAL SCALE REQUIREMENTS ═══
-${isBrick ? `At these dimensions, the wall MUST contain:
-  • VERTICALLY: ~${scaleReport.expectedCoursesH} brick courses (each ${(courseH / 10).toFixed(1)} cm tall)
-  • HORIZONTALLY: ~${scaleReport.expectedUnitsW} bricks per row (each ${(moduleW / 10).toFixed(1)} cm wide + ${(joint / 10).toFixed(1)} cm mortar)
+5. AMBIENT OCCLUSION — Darken subtly where wall meets ceiling, floor, and corners.
 
-DIMENSIONAL ANCHORS — verify your output against these:
-  • A standard door (200 cm) should have ~${bricksNextToDoor} brick courses beside it
-  • Floor-to-ceiling (~${sceneDims.ceilingHeightCm || 270} cm) should have ~${bricksFullWall} courses total
-  • A light switch (at ~115 cm from floor) should be at approximately course ${Math.round(1150 / courseH)}
-  • Each individual brick should appear ${(moduleH / 10).toFixed(1)} cm tall — about the width of an adult's palm
-  • 10 stacked bricks (with mortar) = ${(courseH * 10 / 10).toFixed(0)} cm ≈ knee height
+6. CONTACT SHADOWS — Where furniture/objects touch the textured wall, add natural shadow.
 
-The COMPOSITE image (image 2) already has ~${scaleReport.coursesInPoly} courses and ~${scaleReport.unitsInPolyRow} bricks per row at the correct scale.
-YOU MUST MATCH THIS EXACT SCALE. Count the courses in the COMPOSITE and reproduce the same count.` :
-`At these dimensions, the wall should contain:
-  • VERTICALLY: ~${scaleReport.expectedCoursesH} panel rows
-  • HORIZONTALLY: ~${scaleReport.expectedUnitsW} panels per row
+TEXTURE FIDELITY IS THE #1 PRIORITY:
+• The EXACT colors from image 4 (TEXTURE TILE) must appear in the final output — same hue, same saturation, same tone
+• Every individual ${isBrick ? "brick pattern, color variation, surface crack, and mortar shade" : "panel grain, color variation, and surface detail"} visible in the COMPOSITE must remain UNCHANGED
+• If you see ${scaleReport.coursesInPoly} ${isBrick ? "brick courses" : "rows"} in the COMPOSITE, your output must have EXACTLY ${scaleReport.coursesInPoly} ${isBrick ? "courses" : "rows"}
+• The texture is a real commercial product — the customer MUST be able to recognize it as "${productName}"
 
-The COMPOSITE image already has the correct scale — match it exactly.`}
+ABSOLUTE RULES:
+• Start from the COMPOSITE (image 2) — do NOT start from scratch
+• Do NOT invent, hallucinate, or regenerate the texture — it's already there
+• Do NOT change texture colors, pattern, scale, or tile count
+• Do NOT alter anything outside the masked wall area — keep it pixel-identical to image 1
+• Do NOT cover furniture, objects, windows, doors, or fixtures
+• Do NOT zoom, crop, or change image dimensions
+• Keep the same image resolution and aspect ratio
 
-═══ PERSPECTIVE & GEOMETRY ═══
-  • Study the ORIGINAL photo for vanishing points, camera tilt, and lens distortion
-  • Perspective angle: ${sceneDims.perspectiveAngle}
-  • The texture MUST follow the same perspective foreshortening as the wall surface
-  • Bricks further from camera appear smaller — this is correct perspective, not a scale error
-  • Mortar lines must converge toward vanishing points like any real surface
-  • The COMPOSITE already has correct flat tiling — add perspective warping to match the wall plane
+The wall is approximately ${sceneDims.wallHeightCm}cm × ${sceneDims.wallWidthCm}cm (${sceneDims.sceneType}). ${isBrick ? `Each brick is ${scaleReport.brickBodyWidthMm}×${scaleReport.brickBodyHeightMm}mm with ${scaleReport.jointMm}mm mortar.` : ""}
 
-═══ PHOTOREALISTIC RENDERING ═══
-  First, analyze the ORIGINAL image lighting:
-  • Identify the dominant light direction (left, right, top, diffuse)
-  • Note the color temperature (warm, cool, neutral)
-  • Observe shadow intensity on existing objects
-
-  Then apply:
-  • Ambient occlusion at ceiling/floor/corner junctions — subtle darkening
-  • Contact shadows where furniture meets the textured wall
-  • Surface relief: ${isBrick ? "each brick must show individual 3D depth — highlight on top edge, shadow on bottom edge, recessed mortar joints with micro-shadows" : "each panel with subtle edge shadows and visible gaps between panels"}
-  • Natural edge blending where texture meets non-textured areas
-  • Match the room's color temperature, exposure, white balance, and noise/grain
-  • Texture color must match image 4 (PRODUCT TEXTURE) — preserve the exact hue and tone
-  • Everything outside the textured area = pixel-perfect identical to ORIGINAL
-
-═══ ABSOLUTE RESTRICTIONS ═══
-  • Do NOT zoom, crop, pan, rotate, or change image dimensions
-  • Do NOT extend texture beyond the orange mask boundary
-  • Do NOT texture ceiling, floor, or other walls
-  • Do NOT cover or alter any furniture, objects, windows, doors, electrical fixtures
-  • Do NOT change the brick/tile count — KEEP the same scale as the COMPOSITE
-  • Do NOT stretch or squash bricks — maintain the ${(moduleW / moduleH).toFixed(1)}:1 aspect ratio
-
-Return ONLY the final photorealistic image. No text, no explanation.`;
+Output ONLY the final image. No text.`;
 }
 
 /* ── Watermark ── */
