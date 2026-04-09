@@ -24,11 +24,21 @@ interface Product {
   shopUrl: string;
 }
 type Stage = "upload" | "edit" | "rendering" | "generated";
+interface ScaleInfo {
+  wallHeightCm: number;
+  wallWidthCm: number;
+  courses: number;
+  unitsPerRow: number;
+  dimensionSource: "ai" | "heuristic";
+  sceneType: "interior" | "exterior";
+  referenceObjects: string[];
+}
 interface RenderData {
   composite: string | null;
   refined: string | null;
   geminiModel: string;
   timings: Record<string, number>;
+  scale?: ScaleInfo;
 }
 type ResultTab = "final" | "composite" | "compare";
 
@@ -388,7 +398,7 @@ export default function Home() {
       }, 3);
       if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(formatFastApiError(err) || `Server error ${res.status}`); }
       const data = await res.json();
-      setRenderData({ composite: data.composite || null, refined: data.refined || data.composite || null, geminiModel: data.gemini_model || "unknown", timings: data.timings || {} });
+      setRenderData({ composite: data.composite || null, refined: data.refined || data.composite || null, geminiModel: data.gemini_model || "unknown", timings: data.timings || {}, scale: data.scale || undefined });
       setResultTab("final");
       setStage("generated");
       fetchRemaining();
@@ -641,15 +651,27 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* Product + timing info */}
+                      {/* Product + scale info */}
                       {selectedProduct && (
-                        <div className="flex items-center gap-3 px-1">
-                          <img src={`/api/textures/${selectedProduct.productId}`} alt="" className="w-10 h-10 rounded-lg object-cover border border-stone-200" />
-                          <div>
+                        <div className="flex items-start gap-3 px-1">
+                          <img src={`/api/textures/${selectedProduct.productId}`} alt="" className="w-10 h-10 rounded-lg object-cover border border-stone-200 mt-0.5" />
+                          <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-stone-700">{selectedProduct.name}</p>
                             <p className="text-[10px] text-stone-400">
-                              {selectedProduct.moduleWidthMm}×{selectedProduct.moduleHeightMm}mm
+                              Moduł: {selectedProduct.moduleWidthMm}×{selectedProduct.moduleHeightMm}mm
                             </p>
+                            {renderData?.scale && (
+                              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-stone-400">
+                                <span>Ściana: ~{renderData.scale.wallHeightCm}×{renderData.scale.wallWidthCm} cm</span>
+                                <span>Rzędy: ~{renderData.scale.courses}</span>
+                                <span>Szt./rząd: ~{renderData.scale.unitsPerRow}</span>
+                                {renderData.scale.referenceObjects.length > 0 && (
+                                  <span className="text-[#A01B1B]/60">
+                                    Ref: {renderData.scale.referenceObjects.join(", ")}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}

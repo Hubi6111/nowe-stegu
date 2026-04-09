@@ -1,5 +1,159 @@
 [
   {
+    "id": "20260409-030944-b41708",
+    "timestamp": "2026-04-09 03:09:44",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.38,
+      "gemini_render": 24.93,
+      "total": 25.36
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-030854-57d3c4",
+    "timestamp": "2026-04-09 03:08:54",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.42,
+      "gemini_render": 58.01,
+      "total": 58.46
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-025747-56e24c",
+    "timestamp": "2026-04-09 02:57:47",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.39,
+      "gemini_render": 44.39,
+      "total": 44.81
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-025640-2f587b",
+    "timestamp": "2026-04-09 02:56:40",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.43,
+      "gemini_render": 64.13,
+      "total": 64.61
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-025341-1880b9",
+    "timestamp": "2026-04-09 02:53:41",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.43,
+      "gemini_render": 103.35,
+      "total": 103.84
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-024927-890b8f",
+    "timestamp": "2026-04-09 02:49:27",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.39,
+      "gemini_render": 45.8,
+      "total": 46.21
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-024648-15f051",
+    "timestamp": "2026-04-09 02:46:48",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.33,
+      "gemini_render": 48.51,
+      "total": 48.87
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-024536-afb711",
+    "timestamp": "2026-04-09 02:45:36",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.43,
+      "gemini_render": 38.79,
+      "total": 39.28
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-024350-8fbb40",
+    "timestamp": "2026-04-09 02:43:50",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.46,
+      "gemini_render": 59.63,
+      "total": 60.12
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-023954-be8da1",
+    "timestamp": "2026-04-09 02:39:54",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.42,
+      "gemini_render": 42.66,
+      "total": 43.11
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-023851-6ea9bf",
+    "timestamp": "2026-04-09 02:38:51",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.47,
+      "gemini_render": 45.09,
+      "total": 45.62
+    },
+    "has_image": true
+  },
+  {
     "id": "20260409-022024-bac328",
     "timestamp": "2026-04-09 02:20:24",
     "client_ip": "127.0.0.1",

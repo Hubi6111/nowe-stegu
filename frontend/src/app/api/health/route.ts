@@ -34,13 +34,15 @@ export async function GET() {
     }
   }
 
+  const geminiKey = !!process.env.GEMINI_API_KEY;
   return NextResponse.json({
-    status: "degraded",
-    gemini_configured: false,
-    inference_url: "http://127.0.0.1:8001",
+    status: geminiKey ? "ok-standalone" : "degraded",
+    gemini_configured: geminiKey,
+    mode: "nextjs-standalone",
+    inference_url: base || "none",
     inference_reachable: false,
-    inference_ready: false,
-    inference_status: {},
-    note: "FastAPI (:8000) unreachable — start API or run scripts/start-all.sh",
+    note: geminiKey
+      ? "Running in Next.js standalone mode with Gemini API"
+      : "FastAPI unreachable and GEMINI_API_KEY not set",
   });
 }

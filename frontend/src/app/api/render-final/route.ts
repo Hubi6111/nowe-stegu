@@ -9,7 +9,6 @@ export const maxDuration = 300;
 
 interface Point { x: number; y: number }
 
-const WALL_HEIGHT_MM = 2850;
 const MAX_PROCESS_DIM = 2048;
 const MAX_TILES = 400;
 const WATERMARK_OPACITY = 0.3;
@@ -42,128 +41,250 @@ function getWatermarkPath(): string | null {
   return null;
 }
 
-/* ── Texture scale computation with dimensional verification ── */
+/* ══════════════════════════════════════════════════════════
+   PHASE 1: AI Scene Dimension Analysis
+   Uses reference objects to estimate real-world wall size
+   ══════════════════════════════════════════════════════════ */
+
+const SCENE_DIMENSION_PROMPT = `You are an expert at estimating real-world dimensions from photographs using reference objects.
+
+You receive TWO images:
+1. ORIGINAL room/building photograph
+2. MASK OVERLAY — same photo with ORANGE highlight showing the wall area the user selected
+
+YOUR TASK: Estimate the REAL-WORLD dimensions (in centimeters) of the ORANGE-highlighted wall area.
+
+═══ REFERENCE OBJECTS WITH KNOWN DIMENSIONS ═══
+Use ANY of these visible in the photo to triangulate dimensions:
+
+DOORS & WINDOWS:
+• Standard interior door height: 200 cm (THIS IS YOUR PRIMARY REFERENCE)
+• Standard interior door width: 80-90 cm
+• Standard exterior door: 200-210 cm tall × 90-100 cm wide
+• Standard window height: 120-150 cm
+• Window sill from floor: 80-90 cm
+
+ROOM STRUCTURE:
+• Typical European interior ceiling height: 250-280 cm
+• Standard baseboard/skirting: 8-12 cm tall
+• Standard door frame/architrave width: 6-8 cm
+
+ELECTRICAL:
+• Light switch plate: ~8×8 cm, mounted 110-120 cm from floor
+• Power outlet plate: ~8×8 cm, mounted 25-30 cm from floor
+
+FURNITURE:
+• Dining table height: 75 cm
+• Kitchen counter height: 85-90 cm
+• Standard chair seat: 45 cm from floor
+• Sofa seat height: 40-45 cm, back height: 80-90 cm
+• Standard bookshelf: 180-200 cm tall
+
+EXTERIOR:
+• Standard brick course: 6.5-8 cm tall (if existing bricks visible)
+• Standard window: 120×100 cm
+• Garage door: 210-240 cm tall × 240-300 cm wide
+• Fence post height: 100-180 cm
+
+═══ METHOD ═══
+1. Identify ALL reference objects visible in the image
+2. For EACH reference, estimate how many pixels it occupies vs how many pixels the wall area occupies
+3. Cross-reference multiple objects to increase accuracy
+4. Account for perspective foreshortening (objects further from camera appear smaller)
+5. For the highlighted wall area, estimate both height and width in real centimeters
+
+═══ CRITICAL RULES ═══
+• If a door is visible, it is ALWAYS 200 cm tall — use this as your primary anchor
+• Interior ceiling is 250-280 cm unless clearly unusual
+• Be conservative: slightly underestimate rather than overestimate
+• Consider if the highlighted area is a PARTIAL wall (not floor-to-ceiling)
+
+OUTPUT a single JSON object (no markdown, no code fences):
+{"wallHeightCm":220,"wallWidthCm":300,"ceilingHeightCm":265,"sceneType":"interior","referenceObjects":[{"name":"door","estimatedSizeCm":200,"pixelsCovered":450,"confidence":"high"}],"confidence":"high","perspectiveAngle":"frontal","notes":"Door clearly visible at left edge, used as primary reference"}`;
+
+interface SceneDimensions {
+  wallHeightCm: number;
+  wallWidthCm: number;
+  ceilingHeightCm: number | null;
+  sceneType: "interior" | "exterior";
+  confidence: "high" | "medium" | "low";
+  perspectiveAngle: string;
+  referenceObjects: { name: string; estimatedSizeCm: number; confidence: string }[];
+}
+
+const DEFAULT_DIMENSIONS: SceneDimensions = {
+  wallHeightCm: 260,
+  wallWidthCm: 350,
+  ceilingHeightCm: 270,
+  sceneType: "interior",
+  confidence: "low",
+  perspectiveAngle: "frontal",
+  referenceObjects: [],
+};
+
+async function analyzeSceneDimensions(
+  genAI: GoogleGenerativeAI,
+  originalBuf: Buffer,
+  maskOverlayBuf: Buffer,
+  polyHeightFraction: number,
+  polyWidthFraction: number,
+): Promise<SceneDimensions> {
+  const textModelId = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-pro";
+  try {
+    const model = genAI.getGenerativeModel({ model: textModelId });
+    const result = await geminiRetry(() => model.generateContent([
+      { text: SCENE_DIMENSION_PROMPT },
+      { inlineData: { mimeType: "image/jpeg", data: originalBuf.toString("base64") } },
+      { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuf.toString("base64") } },
+    ]));
+    const text = result.response.text?.() ?? "";
+    const clean = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
+    const m = clean.match(/\{[\s\S]*\}/);
+    if (m) {
+      const parsed = JSON.parse(m[0]);
+      const dims: SceneDimensions = {
+        wallHeightCm: clamp(Number(parsed.wallHeightCm) || 260, 30, 1200),
+        wallWidthCm: clamp(Number(parsed.wallWidthCm) || 350, 30, 2000),
+        ceilingHeightCm: parsed.ceilingHeightCm ? clamp(Number(parsed.ceilingHeightCm), 200, 500) : null,
+        sceneType: parsed.sceneType === "exterior" ? "exterior" : "interior",
+        confidence: (["high", "medium", "low"] as const).includes(parsed.confidence) ? parsed.confidence : "medium",
+        perspectiveAngle: String(parsed.perspectiveAngle || "frontal"),
+        referenceObjects: Array.isArray(parsed.referenceObjects) ? parsed.referenceObjects : [],
+      };
+
+      // Sanity checks using polygon fraction
+      if (dims.sceneType === "interior") {
+        const impliedCeiling = dims.wallHeightCm / polyHeightFraction;
+        if (impliedCeiling > 500) {
+          dims.wallHeightCm = Math.round(280 * polyHeightFraction * 1.1);
+          dims.confidence = "low";
+        }
+        if (impliedCeiling < 180 && polyHeightFraction < 0.9) {
+          dims.wallHeightCm = Math.round(265 * polyHeightFraction);
+          dims.confidence = "low";
+        }
+      }
+
+      console.log("[render-final] AI dimensions:", JSON.stringify(dims));
+      return dims;
+    }
+  } catch (e) {
+    console.warn("[render-final] Scene dimension analysis failed:", e);
+  }
+
+  // Fallback: heuristic estimation
+  const fallbackCeiling = 270;
+  return {
+    ...DEFAULT_DIMENSIONS,
+    wallHeightCm: Math.round(fallbackCeiling * polyHeightFraction * 1.05),
+    wallWidthCm: Math.round(fallbackCeiling * polyWidthFraction * 1.05),
+  };
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+/* ══════════════════════════════════════════════════════════
+   PHASE 2: Precise texture scale computation
+   Uses AI dimensions + product physical specs
+   ══════════════════════════════════════════════════════════ */
 
 interface ScaleReport {
   scale: number;
   wallHeightMm: number;
   wallWidthMm: number;
-  expectedCoursesH: number;
-  expectedUnitsW: number;
   courseHeightMm: number;
   unitWidthMm: number;
+  expectedCoursesH: number;
+  expectedUnitsW: number;
   coursesInPoly: number;
   unitsInPolyRow: number;
+  brickBodyHeightMm: number;
+  brickBodyWidthMm: number;
+  jointMm: number;
+  dimensionSource: "ai" | "heuristic";
   verified: boolean;
 }
 
 function computeTextureScale(
   polyHeightPx: number,
   polyWidthPx: number,
-  imageHeightPx: number,
-  imageWidthPx: number,
   textureHeightPx: number,
   textureWidthPx: number,
-  meta: Record<string, unknown>
+  meta: Record<string, unknown>,
+  sceneDims: SceneDimensions,
 ): ScaleReport {
-  const moduleH = Number(meta.moduleHeightMm || 65);
+  const moduleH = Number(meta.moduleHeightMm || 80);
   const moduleW = Number(meta.moduleWidthMm || 245);
   const joint = Number(meta.jointMm || 10);
   const layout = String(meta.layoutType || "running-bond");
   let courses = Number(meta.albedoBrickCourses || meta.albedoCourses || 8);
-  courses = Math.max(1, Math.min(courses, 32));
+  courses = clamp(courses, 1, 32);
   const isBrick = layout === "running-bond" || layout === "stretcher-bond";
 
   const courseH = moduleH + joint;
   const unitW = moduleW + joint;
 
+  // Wall dimensions from AI analysis (mm)
+  const wallHMm = sceneDims.wallHeightCm * 10;
+  const wallWMm = sceneDims.wallWidthCm * 10;
+
   // Physical size of one albedo tile
   let albedoHMm: number;
   let albedoWMm: number;
   if (isBrick) {
-    albedoHMm = moduleH * courses + joint * Math.max(courses - 1, 0);
+    albedoHMm = courseH * courses;
     const bricksPerRow = Math.max(1, Math.round(textureWidthPx / textureHeightPx * courses));
-    albedoWMm = moduleW * bricksPerRow + joint * Math.max(bricksPerRow - 1, 0);
+    albedoWMm = unitW * bricksPerRow;
   } else {
-    const planks = Math.max(1, Math.min(Number(meta.albedoStackPlanks || meta.albedoPlankCount || 2), 12));
-    albedoHMm = moduleH * planks + joint * Math.max(planks - 1, 0);
+    const planks = clamp(Number(meta.albedoStackPlanks || meta.albedoPlankCount || 2), 1, 12);
+    albedoHMm = (moduleH + joint) * planks;
     albedoWMm = moduleW;
   }
 
-  // Estimate real-world wall height from polygon coverage fraction
-  const fracH = polyHeightPx / imageHeightPx;
-
-  let wallHMm: number;
-  if (fracH >= 0.6) {
-    wallHMm = WALL_HEIGHT_MM;
-  } else if (fracH >= 0.35) {
-    wallHMm = WALL_HEIGHT_MM * (0.7 + 0.3 * ((fracH - 0.35) / 0.25));
-  } else {
-    wallHMm = Math.max(600, WALL_HEIGHT_MM * fracH * 1.8);
-  }
-
-  // Derive wall width from aspect ratio
-  let wallWMm = wallHMm * (polyWidthPx / polyHeightPx);
-
-  // Cross-validate: typical interior wall 1000-6000mm wide
-  if (wallWMm > 8000) {
-    const correction = 6000 / wallWMm;
-    wallHMm *= correction;
-    wallWMm = wallHMm * (polyWidthPx / polyHeightPx);
-  } else if (wallWMm < 600 && polyWidthPx / imageWidthPx > 0.2) {
-    wallHMm *= 1.2;
-    wallWMm = wallHMm * (polyWidthPx / polyHeightPx);
-  }
-
-  // How many courses and units should fit
+  // How many courses/units should fit in the wall
   const expectedCoursesH = wallHMm / courseH;
   const expectedUnitsW = wallWMm / unitW;
 
-  // Target pixel sizes for one albedo tile
+  // Compute pixel scale: how many pixels per mm of real-world wall
   const pxPerMm = polyHeightPx / wallHMm;
   const targetAlbedoHPx = albedoHMm * pxPerMm;
-  const scaleFromH = targetAlbedoHPx / textureHeightPx;
+  const scale = targetAlbedoHPx / textureHeightPx;
 
-  // Verify: count how many courses would actually fit in polygon at this scale
-  const tileHPx = textureHeightPx * scaleFromH;
+  // Verify: count actual courses at this scale
+  const tileHPx = textureHeightPx * scale;
   const coursesInPoly = (polyHeightPx / tileHPx) * courses;
 
-  // Verify width
-  const tileWPx = textureWidthPx * scaleFromH;
+  const tileWPx = textureWidthPx * scale;
   const albedoRepeatsW = polyWidthPx / tileWPx;
   const bricksPerAlbedo = isBrick ? Math.max(1, Math.round(textureWidthPx / textureHeightPx * courses)) : 1;
   const unitsInPolyRow = albedoRepeatsW * bricksPerAlbedo;
 
-  // Compare expected vs actual — if off by >30%, adjust
-  const hRatio = coursesInPoly / expectedCoursesH;
-  let finalScale = scaleFromH;
-  let verified = true;
-
-  if (hRatio < 0.7 || hRatio > 1.3) {
-    // Recalculate to match expected course count exactly
-    const targetTileH = (polyHeightPx / expectedCoursesH) * courses;
-    finalScale = targetTileH / textureHeightPx;
-    verified = false;
-  }
-
-  const mult = Math.max(0.35, Math.min(Number(meta.textureScaleMultiplier || 1), 2.5));
-  finalScale = Math.max(0.02, finalScale * mult);
+  const mult = clamp(Number(meta.textureScaleMultiplier || 1), 0.5, 2.0);
+  const finalScale = Math.max(0.02, scale * mult);
 
   return {
     scale: finalScale,
     wallHeightMm: Math.round(wallHMm),
     wallWidthMm: Math.round(wallWMm),
-    expectedCoursesH: Math.round(expectedCoursesH),
-    expectedUnitsW: Math.round(expectedUnitsW),
     courseHeightMm: courseH,
     unitWidthMm: unitW,
+    expectedCoursesH: Math.round(expectedCoursesH),
+    expectedUnitsW: Math.round(expectedUnitsW),
     coursesInPoly: Math.round(coursesInPoly),
     unitsInPolyRow: Math.round(unitsInPolyRow),
-    verified,
+    brickBodyHeightMm: moduleH,
+    brickBodyWidthMm: moduleW,
+    jointMm: joint,
+    dimensionSource: sceneDims.confidence !== "low" ? "ai" : "heuristic",
+    verified: Math.abs(coursesInPoly - expectedCoursesH) / expectedCoursesH < 0.15,
   };
 }
 
-/* ── Scene analysis prompt (mirrors Python analyze_wall_scene) ── */
+/* ══════════════════════════════════════════════════════════
+   Scene lighting analysis prompt
+   ══════════════════════════════════════════════════════════ */
 
 const SCENE_ANALYSIS_PROMPT = `You are analysing a room photo where a wall texture has been applied.
 
@@ -173,104 +294,125 @@ You receive THREE images:
   3. MASK OVERLAY — orange highlight showing where texture is placed
 
 Analyse the scene and OUTPUT a single JSON object (no markdown, no code fences):
-{"lighting_direction":"left","lighting_temperature":"warm","ambient_level":0.65,"shadow_intensity":"medium","blend_notes":"soft fade at ceiling; crisp edge at shelf","texture_scale_looks_correct":true,"scale_notes":"bricks appear correctly sized relative to furniture"}
+{"lighting_direction":"left","lighting_temperature":"warm","ambient_level":0.65,"shadow_intensity":"medium","blend_notes":"soft fade at ceiling; crisp edge at shelf","texture_scale_looks_correct":true,"scale_adjustment_factor":1.0,"scale_notes":"bricks appear correctly sized relative to door"}
 
 Fields:
 - lighting_direction: "left", "right", "top", "diffuse"
 - lighting_temperature: "warm", "cool", "neutral"
 - ambient_level: 0.0–1.0
 - shadow_intensity: "light", "medium", "strong"
-- blend_notes: brief note about how texture edges should blend at boundaries
-- texture_scale_looks_correct: true/false — does the brick/tile size in image 2 look physically realistic compared to objects in image 1?
-- scale_notes: brief note about whether bricks/tiles appear correctly sized relative to doors, furniture, power sockets, etc.`;
+- blend_notes: how texture edges should blend at boundaries
+- texture_scale_looks_correct: true/false — do bricks/tiles look physically realistic compared to objects?
+- scale_adjustment_factor: 0.7–1.4 — if scale looks wrong, what multiplier would fix it (1.0 = correct, <1 = bricks too big, >1 = bricks too small)
+- scale_notes: explanation of scale assessment relative to doors, furniture, power sockets`;
 
-/* ── Full photorealistic render prompt (mirrors Python _RENDER_PROMPT_TEMPLATE) ── */
+/* ══════════════════════════════════════════════════════════
+   Photorealistic render prompt (Phase 3)
+   ══════════════════════════════════════════════════════════ */
 
 function buildRenderPrompt(
   productName: string,
   meta: Record<string, unknown>,
   analysis: Record<string, unknown>,
-  scaleReport: ScaleReport
+  scaleReport: ScaleReport,
+  sceneDims: SceneDimensions,
 ): string {
-  const moduleH = Number(meta.moduleHeightMm || 80);
-  const moduleW = Number(meta.moduleWidthMm || 245);
-  const joint = Number(meta.jointMm || 10);
+  const moduleH = scaleReport.brickBodyHeightMm;
+  const moduleW = scaleReport.brickBodyWidthMm;
+  const joint = scaleReport.jointMm;
   const layout = String(meta.layoutType || "running-bond");
   const isBrick = layout === "running-bond" || layout === "stretcher-bond";
   const materialType = isBrick ? "decorative brick cladding" : "decorative wall panel";
 
-  const dimInstructions = isBrick
-    ? `Product: ${materialType} — "${productName}".
-  • Each brick: ${moduleW} mm wide × ${moduleH} mm tall (≈ ${(moduleW / 10).toFixed(1)} × ${(moduleH / 10).toFixed(1)} cm)
-  • Mortar joint: ${joint} mm (≈ ${(joint / 10).toFixed(1)} cm)
-  • Course height (brick + joint): ${moduleH + joint} mm (≈ ${((moduleH + joint) / 10).toFixed(1)} cm)`
-    : `Product: ${materialType} — "${productName}".
-  • Each panel: ${moduleW} mm wide × ${moduleH} mm tall
+  const courseH = moduleH + joint;
+  const bricksNextToDoor = Math.round(2000 / courseH);
+  const bricksFullWall = Math.round((sceneDims.ceilingHeightCm || 270) * 10 / courseH);
+
+  const refObjectsDesc = sceneDims.referenceObjects.length > 0
+    ? sceneDims.referenceObjects.map(r => `  • ${r.name}: ~${r.estimatedSizeCm} cm (${r.confidence} confidence)`).join("\n")
+    : "  • No specific reference objects detected — using standard room proportions";
+
+  const dimBlock = isBrick
+    ? `PRODUCT: ${materialType} — "${productName}"
+  • Single brick body: ${moduleW} mm wide × ${moduleH} mm tall (${(moduleW / 10).toFixed(1)} × ${(moduleH / 10).toFixed(1)} cm)
+  • Mortar joint thickness: ${joint} mm (${(joint / 10).toFixed(1)} cm)
+  • One course height (brick + mortar): ${courseH} mm (${(courseH / 10).toFixed(1)} cm)
+  • Brick aspect ratio: ${(moduleW / moduleH).toFixed(1)}:1 (each brick is ${(moduleW / moduleH).toFixed(1)}× wider than tall)`
+    : `PRODUCT: ${materialType} — "${productName}"
+  • Single panel: ${moduleW} mm wide × ${moduleH} mm tall (${(moduleW / 10).toFixed(1)} × ${(moduleH / 10).toFixed(1)} cm)
   • Gap between panels: ${joint} mm`;
-
-  const scaleVerification = `
-═══ ALGORITHMIC SCALE VERIFICATION (pre-computed) ═══
-Our algorithm estimated the selected wall area to be approximately:
-  • Wall height: ~${scaleReport.wallHeightMm} mm (${(scaleReport.wallHeightMm / 10).toFixed(0)} cm)
-  • Wall width: ~${scaleReport.wallWidthMm} mm (${(scaleReport.wallWidthMm / 10).toFixed(0)} cm)
-
-At correct real-world scale, this wall should contain:
-  • ~${scaleReport.expectedCoursesH} ${isBrick ? "brick courses" : "panel rows"} vertically (each ${scaleReport.courseHeightMm} mm tall)
-  • ~${scaleReport.expectedUnitsW} ${isBrick ? "bricks" : "panels"} per horizontal row (each ${scaleReport.unitWidthMm} mm wide)
-
-The COMPOSITE image (image 2) was tiled with these parameters. It contains ~${scaleReport.coursesInPoly} courses and ~${scaleReport.unitsInPolyRow} units per row.
-${scaleReport.verified ? "✓ Scale verified — composite matches expected dimensions." : "⚠ Scale was auto-corrected — the composite may have minor deviations."}
-
-CRITICAL: You MUST preserve this exact scale in your render. Count the ${isBrick ? "brick courses" : "rows"} in the COMPOSITE and ensure your output has the same number. If you see ~${scaleReport.coursesInPoly} courses in the composite, your output must also show ~${scaleReport.coursesInPoly} courses.`;
 
   const lightDir = String(analysis.lighting_direction || "diffuse");
   const lightTemp = String(analysis.lighting_temperature || "neutral");
   const shadowInt = String(analysis.shadow_intensity || "medium");
   const blendNotes = String(analysis.blend_notes || "natural fade at all edges");
 
-  return `You are an expert photorealistic interior rendering engine. Your goal: make the textured wall look indistinguishable from a real renovation photograph.
+  return `You are an expert photorealistic interior/exterior rendering engine. Your #1 priority: PHYSICALLY CORRECT BRICK/TILE DIMENSIONS. The textured wall must be indistinguishable from a real renovation photograph.
 
 YOU RECEIVE FOUR IMAGES (in order):
-  1. ORIGINAL — the unmodified room photo
-  2. COMPOSITE — room with texture algorithmically placed at verified real-world scale
-  3. MASK OVERLAY — ORIGINAL with ORANGE highlight = user's selection area
-  4. PRODUCT TEXTURE TILE — the real decorative material
+  1. ORIGINAL — the unmodified room/building photo
+  2. COMPOSITE — room with texture algorithmically placed at calculated real-world scale
+  3. MASK OVERLAY — ORIGINAL with ORANGE highlight = user's wall selection
+  4. PRODUCT TEXTURE TILE — the real decorative material to apply
 
-═══ SCENE ANALYSIS ═══
-  1. In the ORIGINAL, identify: wall surface vs non-wall (furniture, objects, ceiling, floor, other walls)
-  2. Apply texture ONLY on flat wall surface within the orange selection
-  3. Keep everything else from the ORIGINAL untouched (furniture, objects, etc.)
+═══ WALL DIMENSIONS (AI-estimated from reference objects) ═══
+Scene type: ${sceneDims.sceneType}
+Highlighted wall area: ~${sceneDims.wallHeightCm} cm tall × ~${sceneDims.wallWidthCm} cm wide
+${sceneDims.ceilingHeightCm ? `Ceiling height: ~${sceneDims.ceilingHeightCm} cm` : ""}
+Dimension confidence: ${sceneDims.confidence}
+Reference objects used:
+${refObjectsDesc}
 
-═══ PHYSICAL DIMENSIONS ═══
-${dimInstructions}
-${scaleVerification}
+═══ PRODUCT PHYSICAL DIMENSIONS ═══
+${dimBlock}
 
-Use reference objects to double-check: standard doors ~200 cm, light switches ~120 cm from floor, ceiling ~270-285 cm.
-A standard doorway should fit ~${Math.round(2000 / (moduleH + joint))} courses next to it.
+═══ CRITICAL SCALE REQUIREMENTS ═══
+${isBrick ? `At these dimensions, the wall MUST contain:
+  • VERTICALLY: ~${scaleReport.expectedCoursesH} brick courses (each ${(courseH / 10).toFixed(1)} cm tall)
+  • HORIZONTALLY: ~${scaleReport.expectedUnitsW} bricks per row (each ${(moduleW / 10).toFixed(1)} cm wide + ${(joint / 10).toFixed(1)} cm mortar)
 
-═══ PERSPECTIVE & SCALE ═══
-  • Study the ORIGINAL for vanishing points and camera angle
-  • The texture must follow the same perspective foreshortening
-  • The COMPOSITE already has the correct scale — match it exactly
-  • Every ${isBrick ? "brick" : "panel"} must have identical physical size (only perspective foreshortening allowed)
+DIMENSIONAL ANCHORS — verify your output against these:
+  • A standard door (200 cm) should have ~${bricksNextToDoor} brick courses beside it
+  • Floor-to-ceiling (~${sceneDims.ceilingHeightCm || 270} cm) should have ~${bricksFullWall} courses total
+  • A light switch (at ~115 cm from floor) should be at approximately course ${Math.round(1150 / courseH)}
+  • Each individual brick should appear ${(moduleH / 10).toFixed(1)} cm tall — about the width of an adult's palm
+  • 10 stacked bricks (with mortar) = ${(courseH * 10 / 10).toFixed(0)} cm ≈ knee height
+
+The COMPOSITE image (image 2) already has ~${scaleReport.coursesInPoly} courses and ~${scaleReport.unitsInPolyRow} bricks per row at the correct scale.
+YOU MUST MATCH THIS EXACT SCALE. Count the courses in the COMPOSITE and reproduce the same count.` :
+`At these dimensions, the wall should contain:
+  • VERTICALLY: ~${scaleReport.expectedCoursesH} panel rows
+  • HORIZONTALLY: ~${scaleReport.expectedUnitsW} panels per row
+
+The COMPOSITE image already has the correct scale — match it exactly.`}
+
+═══ PERSPECTIVE & GEOMETRY ═══
+  • Study the ORIGINAL photo for vanishing points, camera tilt, and lens distortion
+  • Perspective angle: ${sceneDims.perspectiveAngle}
+  • The texture MUST follow the same perspective foreshortening as the wall surface
+  • Bricks further from camera appear smaller — this is correct perspective, not a scale error
+  • Mortar lines must converge toward vanishing points like any real surface
+  • The COMPOSITE already has correct flat tiling — add perspective warping to match the wall plane
 
 ═══ PHOTOREALISTIC RENDERING ═══
   • Lighting: ${lightTemp} from ${lightDir}
-  • Ambient occlusion at ceiling/floor junctions
-  • Contact shadows where furniture meets wall (intensity: ${shadowInt})
-  • Surface relief: individual ${isBrick ? "bricks with edge shadows, recessed mortar lines" : "panels with subtle edge shadows, visible gaps"}
+  • Ambient occlusion at ceiling/floor/corner junctions — subtle darkening
+  • Contact shadows where furniture meets the textured wall (intensity: ${shadowInt})
+  • Surface relief: ${isBrick ? "each brick must show individual 3D depth — highlight on top edge, shadow on bottom edge, recessed mortar joints with micro-shadows" : "each panel with subtle edge shadows and visible gaps between panels"}
   • Edge blending: ${blendNotes}
-  • Match room's color temperature, exposure, white balance
-  • Everything outside textured area = identical to ORIGINAL
+  • Match the room's color temperature, exposure, white balance, and noise/grain
+  • Texture color must match image 4 (PRODUCT TEXTURE) — preserve the exact hue and tone
+  • Everything outside the textured area = pixel-perfect identical to ORIGINAL
 
-═══ RESTRICTIONS ═══
-  • Do NOT zoom, crop, pan, or change dimensions
-  • Do NOT extend texture beyond orange boundary
+═══ ABSOLUTE RESTRICTIONS ═══
+  • Do NOT zoom, crop, pan, rotate, or change image dimensions
+  • Do NOT extend texture beyond the orange mask boundary
   • Do NOT texture ceiling, floor, or other walls
-  • Do NOT cover furniture or objects
-  • KEEP the same tiling pattern and scale as the COMPOSITE
+  • Do NOT cover or alter any furniture, objects, windows, doors, electrical fixtures
+  • Do NOT change the brick/tile count — KEEP the same scale as the COMPOSITE
+  • Do NOT stretch or squash bricks — maintain the ${(moduleW / moduleH).toFixed(1)}:1 aspect ratio
 
-Return ONLY the final photorealistic image. No text.`;
+Return ONLY the final photorealistic image. No text, no explanation.`;
 }
 
 /* ── Watermark ── */
@@ -332,7 +474,7 @@ async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T>
   throw last;
 }
 
-/* ── Scene analysis (Step 1) ── */
+/* ── Scene lighting analysis (Phase 2b) ── */
 
 async function analyzeWallScene(
   genAI: GoogleGenerativeAI,
@@ -346,6 +488,8 @@ async function analyzeWallScene(
     ambient_level: 0.6,
     shadow_intensity: "medium",
     blend_notes: "natural fade at all edges",
+    texture_scale_looks_correct: true,
+    scale_adjustment_factor: 1.0,
   };
   const textModelId = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-pro";
   try {
@@ -357,7 +501,6 @@ async function analyzeWallScene(
       { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuf.toString("base64") } },
     ]));
     const text = result.response.text?.() ?? "";
-    // strip markdown fences if present
     const clean = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
     const m = clean.match(/\{[\s\S]*\}/);
     if (m) {
@@ -372,28 +515,22 @@ async function analyzeWallScene(
   return defaults;
 }
 
-/* ── Masked composite (Python safety-net: preserve non-wall areas from original) ── */
+/* ── Masked composite (preserve non-wall areas from original) ── */
 
 async function maskedComposite(
   originalBuf: Buffer,
   renderedBuf: Buffer,
-  maskBuf: Buffer, // grayscale mask PNG
+  maskBuf: Buffer,
   W: number,
   H: number,
 ): Promise<Buffer> {
   try {
-    // Resize rendered image to match original dimensions (Gemini may return slightly different size)
     const renderedResized = await sharp(renderedBuf).resize(W, H).jpeg({ quality: 95 }).toBuffer();
-
-    // Create RGBA rendered image with mask as alpha channel
-    // Where mask is white (255) → use rendered; where black (0) → use original
     const renderedWithAlpha = await sharp(renderedResized)
       .ensureAlpha()
       .composite([{ input: maskBuf, blend: "dest-in" }])
       .png()
       .toBuffer();
-
-    // Composite: original underneath, rendered with mask alpha on top
     const result = await sharp(originalBuf)
       .composite([{ input: renderedWithAlpha }])
       .jpeg({ quality: 92 })
@@ -406,7 +543,7 @@ async function maskedComposite(
 }
 
 /* ══════════════════════════════════════════════════════════
-   POST handler
+   POST handler — 3-phase pipeline
    ══════════════════════════════════════════════════════════ */
 
 export async function POST(req: NextRequest) {
@@ -467,7 +604,15 @@ export async function POST(req: NextRequest) {
     const sy = H / canvas_height;
     const scaledPoly = polygon.map(p => ({ x: p.x * sx, y: p.y * sy }));
 
-    /* ── 4. Load texture + meta ── */
+    /* ── 4. Compute polygon bounds ── */
+    const polyXs = scaledPoly.map(p => p.x);
+    const polyYs = scaledPoly.map(p => p.y);
+    const polyWidth = Math.max(...polyXs) - Math.min(...polyXs);
+    const polyHeight = Math.max(...polyYs) - Math.min(...polyYs);
+    const polyHeightFraction = polyHeight / H;
+    const polyWidthFraction = polyWidth / W;
+
+    /* ── 5. Load texture + meta ── */
     const texturesDir = getTexturesDir();
     if (!texturesDir) {
       return NextResponse.json({ error: "Textures directory not found" }, { status: 500 });
@@ -481,65 +626,8 @@ export async function POST(req: NextRequest) {
     const textureFileBuffer = fs.readFileSync(texturePath);
     const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
 
-    /* ── 5. Texture tiling ── */
-    const t1 = Date.now();
-    const texMeta = await sharp(textureFileBuffer).metadata();
-    const polyXs = scaledPoly.map(p => p.x);
-    const polyYs = scaledPoly.map(p => p.y);
-    const polyWidth = Math.max(...polyXs) - Math.min(...polyXs);
-    const polyHeight = Math.max(...polyYs) - Math.min(...polyYs);
-    const scaleReport = computeTextureScale(polyHeight, polyWidth, H, W, texMeta.height!, texMeta.width!, meta);
-    const texScale = scaleReport.scale;
-    console.log("[render-final] Scale report:", JSON.stringify(scaleReport));
-
-    let tileW = Math.max(Math.round(texMeta.width! * texScale), 1);
-    let tileH = Math.max(Math.round(texMeta.height! * texScale), 1);
-    let tilesX = Math.ceil(W / tileW);
-    let tilesY = Math.ceil(H / tileH);
-    if (tilesX * tilesY > MAX_TILES) {
-      const factor = Math.sqrt((tilesX * tilesY) / MAX_TILES);
-      tileW = Math.round(tileW * factor);
-      tileH = Math.round(tileH * factor);
-      tilesX = Math.ceil(W / tileW);
-      tilesY = Math.ceil(H / tileH);
-    }
-
-    const scaledTexBuf = await sharp(textureFileBuffer).resize(tileW, tileH).toBuffer();
-
-    const tileOps: sharp.OverlayOptions[] = [];
-    for (let y = 0; y < H; y += tileH) {
-      for (let x = 0; x < W; x += tileW) {
-        tileOps.push({ input: scaledTexBuf, left: x, top: y });
-      }
-    }
-    const tiledBuffer = await sharp({
-      create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 255 } },
-    }).composite(tileOps).png().toBuffer();
-
-    /* ── 6. Polygon mask ── */
+    /* ── 6. Create mask overlay for dimension analysis ── */
     const points = scaledPoly.map(p => `${Math.round(p.x)},${Math.round(p.y)}`).join(" ");
-    const maskSvg = Buffer.from(
-      `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
-      `<polygon points="${points}" fill="white"/>` +
-      `</svg>`
-    );
-    const maskPng = await sharp(maskSvg).ensureAlpha().png().toBuffer();
-    const grayMaskPng = await sharp(maskSvg).grayscale().png().toBuffer();
-
-    const maskedTexture = await sharp(tiledBuffer)
-      .composite([{ input: maskPng, blend: "dest-in" }])
-      .png()
-      .toBuffer();
-
-    const compositeBuffer = await sharp(resizedImgBuffer)
-      .composite([{ input: maskedTexture }])
-      .jpeg({ quality: 92 })
-      .toBuffer();
-
-    const compositeB64 = "data:image/jpeg;base64," + compositeBuffer.toString("base64");
-    timings.texture_project = Math.round((Date.now() - t1) / 100) / 10;
-
-    /* ── 7. Mask overlay (orange highlight for Gemini) ── */
     const overlaySvg = Buffer.from(
       `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
       `<polygon points="${points}" fill="rgba(255,140,0,0.55)"/>` +
@@ -551,31 +639,150 @@ export async function POST(req: NextRequest) {
       .jpeg({ quality: 88 })
       .toBuffer();
 
-    /* ── 8. Two-step Gemini pipeline ── */
-    const t2 = Date.now();
+    /* ── 7. PHASE 1: AI Scene Dimension Analysis ── */
+    const t1 = Date.now();
     const apiKey = process.env.GEMINI_API_KEY;
-    let refinedB64 = compositeB64;
-    let geminiModel = "not-configured";
+    let sceneDims: SceneDimensions = {
+      ...DEFAULT_DIMENSIONS,
+      wallHeightCm: Math.round(270 * polyHeightFraction * 1.05),
+      wallWidthCm: Math.round(270 * polyWidthFraction * (W / H) * 1.05),
+    };
 
     if (apiKey) {
       const genAI = new GoogleGenerativeAI(apiKey);
+      sceneDims = await analyzeSceneDimensions(
+        genAI, resizedImgBuffer, maskOverlayBuffer,
+        polyHeightFraction, polyWidthFraction,
+      );
+      timings.dimension_analysis = Math.round((Date.now() - t1) / 100) / 10;
 
-      // Step 1: Scene analysis (text model)
+      /* ── 8. PHASE 2: Precise Texture Tiling ── */
+      const t2 = Date.now();
+      const texMeta = await sharp(textureFileBuffer).metadata();
+      const scaleReport = computeTextureScale(
+        polyHeight, polyWidth,
+        texMeta.height!, texMeta.width!,
+        meta, sceneDims,
+      );
+      console.log("[render-final] Scale report:", JSON.stringify(scaleReport));
+
+      let tileW = Math.max(Math.round(texMeta.width! * scaleReport.scale), 1);
+      let tileH = Math.max(Math.round(texMeta.height! * scaleReport.scale), 1);
+      let tilesX = Math.ceil(W / tileW);
+      let tilesY = Math.ceil(H / tileH);
+      if (tilesX * tilesY > MAX_TILES) {
+        const factor = Math.sqrt((tilesX * tilesY) / MAX_TILES);
+        tileW = Math.round(tileW * factor);
+        tileH = Math.round(tileH * factor);
+        tilesX = Math.ceil(W / tileW);
+        tilesY = Math.ceil(H / tileH);
+      }
+
+      const scaledTexBuf = await sharp(textureFileBuffer).resize(tileW, tileH).toBuffer();
+      const tileOps: sharp.OverlayOptions[] = [];
+      for (let y = 0; y < H; y += tileH) {
+        for (let x = 0; x < W; x += tileW) {
+          tileOps.push({ input: scaledTexBuf, left: x, top: y });
+        }
+      }
+      const tiledBuffer = await sharp({
+        create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 255 } },
+      }).composite(tileOps).png().toBuffer();
+
+      // Polygon mask
+      const maskSvg = Buffer.from(
+        `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+        `<polygon points="${points}" fill="white"/>` +
+        `</svg>`
+      );
+      const maskPng = await sharp(maskSvg).ensureAlpha().png().toBuffer();
+      const grayMaskPng = await sharp(maskSvg).grayscale().png().toBuffer();
+
+      const maskedTexture = await sharp(tiledBuffer)
+        .composite([{ input: maskPng, blend: "dest-in" }])
+        .png()
+        .toBuffer();
+
+      const compositeBuffer = await sharp(resizedImgBuffer)
+        .composite([{ input: maskedTexture }])
+        .jpeg({ quality: 92 })
+        .toBuffer();
+
+      const compositeB64 = "data:image/jpeg;base64," + compositeBuffer.toString("base64");
+      timings.texture_project = Math.round((Date.now() - t2) / 100) / 10;
+
+      /* ── 9. PHASE 2b: Scene Lighting Analysis ── */
+      const t3 = Date.now();
       const analysis = await analyzeWallScene(genAI, resizedImgBuffer, compositeBuffer, maskOverlayBuffer);
 
-      // Step 2: Photorealistic render (image model)
-      const imageModelId = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image-preview";
-      geminiModel = imageModelId;
+      // If scene analysis suggests scale correction, re-tile
+      const scaleAdj = Number(analysis.scale_adjustment_factor || 1.0);
+      let finalCompositeBuffer = compositeBuffer;
+      let finalScaleReport = scaleReport;
+
+      if (scaleAdj !== 1.0 && scaleAdj >= 0.7 && scaleAdj <= 1.4 && analysis.texture_scale_looks_correct === false) {
+        console.log(`[render-final] Scale adjustment requested: ${scaleAdj}x`);
+        const adjDims = {
+          ...sceneDims,
+          wallHeightCm: Math.round(sceneDims.wallHeightCm * scaleAdj),
+          wallWidthCm: Math.round(sceneDims.wallWidthCm * scaleAdj),
+        };
+        const adjReport = computeTextureScale(
+          polyHeight, polyWidth,
+          texMeta.height!, texMeta.width!,
+          meta, adjDims,
+        );
+        let adjTileW = Math.max(Math.round(texMeta.width! * adjReport.scale), 1);
+        let adjTileH = Math.max(Math.round(texMeta.height! * adjReport.scale), 1);
+        let adjTilesX = Math.ceil(W / adjTileW);
+        let adjTilesY = Math.ceil(H / adjTileH);
+        if (adjTilesX * adjTilesY > MAX_TILES) {
+          const factor = Math.sqrt((adjTilesX * adjTilesY) / MAX_TILES);
+          adjTileW = Math.round(adjTileW * factor);
+          adjTileH = Math.round(adjTileH * factor);
+          adjTilesX = Math.ceil(W / adjTileW);
+          adjTilesY = Math.ceil(H / adjTileH);
+        }
+        const adjScaledTex = await sharp(textureFileBuffer).resize(adjTileW, adjTileH).toBuffer();
+        const adjTileOps: sharp.OverlayOptions[] = [];
+        for (let y = 0; y < H; y += adjTileH) {
+          for (let x = 0; x < W; x += adjTileW) {
+            adjTileOps.push({ input: adjScaledTex, left: x, top: y });
+          }
+        }
+        const adjTiled = await sharp({
+          create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 255 } },
+        }).composite(adjTileOps).png().toBuffer();
+        const adjMasked = await sharp(adjTiled)
+          .composite([{ input: maskPng, blend: "dest-in" }])
+          .png()
+          .toBuffer();
+        finalCompositeBuffer = await sharp(resizedImgBuffer)
+          .composite([{ input: adjMasked }])
+          .jpeg({ quality: 92 })
+          .toBuffer();
+        finalScaleReport = adjReport;
+        console.log("[render-final] Adjusted scale report:", JSON.stringify(adjReport));
+      }
+
+      timings.scene_analysis = Math.round((Date.now() - t3) / 100) / 10;
+
+      /* ── 10. PHASE 3: Gemini Photorealistic Render ── */
+      const t4 = Date.now();
+      const imageModelId = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-preview-image-generation";
+      let geminiModel = imageModelId;
+      let refinedB64 = "data:image/jpeg;base64," + finalCompositeBuffer.toString("base64");
+
       try {
         const imageModel = genAI.getGenerativeModel({
           model: imageModelId,
           generationConfig: { temperature: 0.2 } as Record<string, unknown>,
         });
-        const prompt = buildRenderPrompt(meta.name || product_id, meta, analysis, scaleReport);
+        const prompt = buildRenderPrompt(meta.name || product_id, meta, analysis, finalScaleReport, sceneDims);
         const result = await geminiRetry(() => imageModel.generateContent([
           { text: prompt },
           { inlineData: { mimeType: "image/jpeg", data: resizedImgBuffer.toString("base64") } },
-          { inlineData: { mimeType: "image/jpeg", data: compositeBuffer.toString("base64") } },
+          { inlineData: { mimeType: "image/jpeg", data: finalCompositeBuffer.toString("base64") } },
           { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuffer.toString("base64") } },
           { inlineData: { mimeType: "image/jpeg", data: textureFileBuffer.toString("base64") } },
         ]));
@@ -585,8 +792,6 @@ export async function POST(req: NextRequest) {
 
         if (imagePart?.inlineData) {
           const renderedBuf = Buffer.from(imagePart.inlineData.data, "base64");
-
-          // Safety net: clip Gemini output to mask (preserve non-wall areas from original)
           const safeOutput = await maskedComposite(resizedImgBuffer, renderedBuf, grayMaskPng, W, H);
           refinedB64 = `data:image/jpeg;base64,${safeOutput.toString("base64")}`;
         }
@@ -594,23 +799,84 @@ export async function POST(req: NextRequest) {
         console.error("[render-final] Gemini render failed:", e);
         geminiModel = `error: ${e instanceof Error ? e.message : String(e)}`;
       }
+
+      timings.gemini_render = Math.round((Date.now() - t4) / 100) / 10;
+
+      /* ── 11. Watermark ── */
+      const refinedRaw = refinedB64.includes(",") ? refinedB64.split(",")[1] : refinedB64;
+      const refinedBuf = Buffer.from(refinedRaw, "base64");
+      const wmBuf = await applyWatermark(refinedBuf);
+      if (wmBuf !== refinedBuf) {
+        refinedB64 = `data:image/jpeg;base64,${wmBuf.toString("base64")}`;
+      }
+
+      timings.total = Math.round((Date.now() - t0) / 100) / 10;
+
+      recordUsage(clientIp, product_id, meta.name || product_id, geminiModel, timings);
+
+      return NextResponse.json({
+        composite: compositeB64,
+        refined: refinedB64,
+        gemini_model: geminiModel,
+        timings,
+        scale: {
+          wallHeightCm: sceneDims.wallHeightCm,
+          wallWidthCm: sceneDims.wallWidthCm,
+          courses: finalScaleReport.expectedCoursesH,
+          unitsPerRow: finalScaleReport.expectedUnitsW,
+          dimensionSource: finalScaleReport.dimensionSource,
+          sceneType: sceneDims.sceneType,
+          referenceObjects: sceneDims.referenceObjects.map(r => r.name),
+        },
+      });
     }
 
-    timings.gemini_render = Math.round((Date.now() - t2) / 100) / 10;
-
-    /* ── 9. Watermark ── */
-    const refinedRaw = refinedB64.includes(",") ? refinedB64.split(",")[1] : refinedB64;
-    const refinedBuf = Buffer.from(refinedRaw, "base64");
-    const wmBuf = await applyWatermark(refinedBuf);
-    if (wmBuf !== refinedBuf) {
-      refinedB64 = `data:image/jpeg;base64,${wmBuf.toString("base64")}`;
+    // No API key — return composite only
+    const texMeta = await sharp(textureFileBuffer).metadata();
+    const fallbackReport = computeTextureScale(
+      polyHeight, polyWidth,
+      texMeta.height!, texMeta.width!,
+      meta, sceneDims,
+    );
+    let tileW = Math.max(Math.round(texMeta.width! * fallbackReport.scale), 1);
+    let tileH = Math.max(Math.round(texMeta.height! * fallbackReport.scale), 1);
+    let tilesX = Math.ceil(W / tileW);
+    let tilesY = Math.ceil(H / tileH);
+    if (tilesX * tilesY > MAX_TILES) {
+      const factor = Math.sqrt((tilesX * tilesY) / MAX_TILES);
+      tileW = Math.round(tileW * factor);
+      tileH = Math.round(tileH * factor);
+      tilesX = Math.ceil(W / tileW);
+      tilesY = Math.ceil(H / tileH);
     }
+    const scaledTexBuf = await sharp(textureFileBuffer).resize(tileW, tileH).toBuffer();
+    const tileOps: sharp.OverlayOptions[] = [];
+    for (let y = 0; y < H; y += tileH) {
+      for (let x = 0; x < W; x += tileW) {
+        tileOps.push({ input: scaledTexBuf, left: x, top: y });
+      }
+    }
+    const tiledBuffer = await sharp({
+      create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 255 } },
+    }).composite(tileOps).png().toBuffer();
+    const maskSvg = Buffer.from(
+      `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">` +
+      `<polygon points="${points}" fill="white"/>` +
+      `</svg>`
+    );
+    const maskPng = await sharp(maskSvg).ensureAlpha().png().toBuffer();
+    const maskedTexture = await sharp(tiledBuffer)
+      .composite([{ input: maskPng, blend: "dest-in" }])
+      .png()
+      .toBuffer();
+    const compositeBuffer = await sharp(resizedImgBuffer)
+      .composite([{ input: maskedTexture }])
+      .jpeg({ quality: 92 })
+      .toBuffer();
+    const compositeB64 = "data:image/jpeg;base64," + compositeBuffer.toString("base64");
 
     timings.total = Math.round((Date.now() - t0) / 100) / 10;
-
-    recordUsage(clientIp, product_id, meta.name || product_id, geminiModel, timings);
-
-    return NextResponse.json({ composite: compositeB64, refined: refinedB64, gemini_model: geminiModel, timings });
+    return NextResponse.json({ composite: compositeB64, refined: compositeB64, gemini_model: "not-configured", timings });
   } catch (e) {
     console.error("[render-final]", e);
     return NextResponse.json(
