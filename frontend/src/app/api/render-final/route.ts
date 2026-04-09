@@ -650,58 +650,40 @@ export async function POST(req: NextRequest) {
       const compositeB64 = "data:image/jpeg;base64," + compositeBuffer.toString("base64");
       timings.texture_project = Math.round((Date.now() - t2) / 100) / 10;
 
-      /* ── 9. PHASE 3: Gemini Photorealistic Render ── */
+      /* ── 9. PHASE 3: Photorealistic Render (Nano Banana 2) ── */
       const t4 = Date.now();
-      const imageModelId = process.env.GEMINI_IMAGE_MODEL || "gemini-2.0-flash-exp";
+      const imageModelId = process.env.GEMINI_IMAGE_MODEL || "gemini-3.1-flash-image-preview";
       let geminiModel = imageModelId;
       let refinedB64 = compositeB64;
 
-      const prompt = buildRenderPrompt(meta.name || product_id, meta, scaleReport, sceneDims);
-      const inputParts = [
-        { text: prompt },
-        { inlineData: { mimeType: "image/jpeg", data: resizedImgBuffer.toString("base64") } },
-        { inlineData: { mimeType: "image/jpeg", data: compositeBuffer.toString("base64") } },
-        { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuffer.toString("base64") } },
-        { inlineData: { mimeType: "image/jpeg", data: textureFileBuffer.toString("base64") } },
-      ];
+      try {
+        const imageModel = genAI.getGenerativeModel({
+          model: imageModelId,
+          generationConfig: { temperature: 0.2 } as Record<string, unknown>,
+        });
+        const prompt = buildRenderPrompt(meta.name || product_id, meta, scaleReport, sceneDims);
+        const result = await geminiRetry(() => imageModel.generateContent([
+          { text: prompt },
+          { inlineData: { mimeType: "image/jpeg", data: resizedImgBuffer.toString("base64") } },
+          { inlineData: { mimeType: "image/jpeg", data: compositeBuffer.toString("base64") } },
+          { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuffer.toString("base64") } },
+          { inlineData: { mimeType: "image/jpeg", data: textureFileBuffer.toString("base64") } },
+        ]));
 
-      // Try with responseModalities first (needed for gemini-2.0-flash-exp),
-      // fall back to plain config (works for gemini-*-image-preview models)
-      for (const attempt of [1, 2] as const) {
-        try {
-          const genConfig = attempt === 1
-            ? { responseModalities: ["Text", "Image"], temperature: 0.2 }
-            : { temperature: 0.2 };
-          const imageModel = genAI.getGenerativeModel({
-            model: imageModelId,
-            generationConfig: genConfig as Record<string, unknown>,
-          });
-          const result = await geminiRetry(() => imageModel.generateContent(inputParts), 2);
+        const parts = result.response.candidates?.[0]?.content?.parts;
+        const imagePart = parts?.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData);
 
-          const parts = result.response.candidates?.[0]?.content?.parts;
-          const imagePart = parts?.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData);
-
-          if (imagePart?.inlineData) {
-            const renderedBuf = Buffer.from(imagePart.inlineData.data, "base64");
-            const safeOutput = await maskedComposite(resizedImgBuffer, renderedBuf, grayMaskPng, W, H);
-            refinedB64 = `data:image/jpeg;base64,${safeOutput.toString("base64")}`;
-            break;
-          }
-
-          if (attempt === 1) {
-            console.warn(`[render-final] Attempt ${attempt}: no image returned, retrying without responseModalities`);
-            continue;
-          }
-          console.warn("[render-final] Gemini returned no image in either attempt");
+        if (imagePart?.inlineData) {
+          const renderedBuf = Buffer.from(imagePart.inlineData.data, "base64");
+          const safeOutput = await maskedComposite(resizedImgBuffer, renderedBuf, grayMaskPng, W, H);
+          refinedB64 = `data:image/jpeg;base64,${safeOutput.toString("base64")}`;
+        } else {
+          console.warn("[render-final] Image model returned no image part");
           geminiModel = `no-image: ${imageModelId}`;
-        } catch (e) {
-          if (attempt === 1) {
-            console.warn(`[render-final] Attempt ${attempt} failed, trying fallback config:`, e instanceof Error ? e.message : String(e));
-            continue;
-          }
-          console.error("[render-final] Gemini render failed:", e);
-          geminiModel = `error: ${e instanceof Error ? e.message : String(e)}`;
         }
+      } catch (e) {
+        console.error("[render-final] Gemini render failed:", e);
+        geminiModel = `error: ${e instanceof Error ? e.message : String(e)}`;
       }
 
       timings.gemini_render = Math.round((Date.now() - t4) / 100) / 10;
