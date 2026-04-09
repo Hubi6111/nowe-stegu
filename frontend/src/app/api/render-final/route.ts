@@ -283,28 +283,9 @@ function computeTextureScale(
 }
 
 /* ══════════════════════════════════════════════════════════
-   Scene lighting analysis prompt
+   (Lighting analysis is now integrated into the render prompt
+    to reduce the number of sequential AI calls from 3 to 2)
    ══════════════════════════════════════════════════════════ */
-
-const SCENE_ANALYSIS_PROMPT = `You are analysing a room photo where a wall texture has been applied.
-
-You receive THREE images:
-  1. ORIGINAL room photo
-  2. COMPOSITE — room with texture applied on wall at algorithmically computed real-world scale
-  3. MASK OVERLAY — orange highlight showing where texture is placed
-
-Analyse the scene and OUTPUT a single JSON object (no markdown, no code fences):
-{"lighting_direction":"left","lighting_temperature":"warm","ambient_level":0.65,"shadow_intensity":"medium","blend_notes":"soft fade at ceiling; crisp edge at shelf","texture_scale_looks_correct":true,"scale_adjustment_factor":1.0,"scale_notes":"bricks appear correctly sized relative to door"}
-
-Fields:
-- lighting_direction: "left", "right", "top", "diffuse"
-- lighting_temperature: "warm", "cool", "neutral"
-- ambient_level: 0.0–1.0
-- shadow_intensity: "light", "medium", "strong"
-- blend_notes: how texture edges should blend at boundaries
-- texture_scale_looks_correct: true/false — do bricks/tiles look physically realistic compared to objects?
-- scale_adjustment_factor: 0.7–1.4 — if scale looks wrong, what multiplier would fix it (1.0 = correct, <1 = bricks too big, >1 = bricks too small)
-- scale_notes: explanation of scale assessment relative to doors, furniture, power sockets`;
 
 /* ══════════════════════════════════════════════════════════
    Photorealistic render prompt (Phase 3)
@@ -313,7 +294,6 @@ Fields:
 function buildRenderPrompt(
   productName: string,
   meta: Record<string, unknown>,
-  analysis: Record<string, unknown>,
   scaleReport: ScaleReport,
   sceneDims: SceneDimensions,
 ): string {
@@ -341,11 +321,6 @@ function buildRenderPrompt(
     : `PRODUCT: ${materialType} — "${productName}"
   • Single panel: ${moduleW} mm wide × ${moduleH} mm tall (${(moduleW / 10).toFixed(1)} × ${(moduleH / 10).toFixed(1)} cm)
   • Gap between panels: ${joint} mm`;
-
-  const lightDir = String(analysis.lighting_direction || "diffuse");
-  const lightTemp = String(analysis.lighting_temperature || "neutral");
-  const shadowInt = String(analysis.shadow_intensity || "medium");
-  const blendNotes = String(analysis.blend_notes || "natural fade at all edges");
 
   return `You are an expert photorealistic interior/exterior rendering engine. Your #1 priority: PHYSICALLY CORRECT BRICK/TILE DIMENSIONS. The textured wall must be indistinguishable from a real renovation photograph.
 
@@ -395,11 +370,16 @@ The COMPOSITE image already has the correct scale — match it exactly.`}
   • The COMPOSITE already has correct flat tiling — add perspective warping to match the wall plane
 
 ═══ PHOTOREALISTIC RENDERING ═══
-  • Lighting: ${lightTemp} from ${lightDir}
+  First, analyze the ORIGINAL image lighting:
+  • Identify the dominant light direction (left, right, top, diffuse)
+  • Note the color temperature (warm, cool, neutral)
+  • Observe shadow intensity on existing objects
+
+  Then apply:
   • Ambient occlusion at ceiling/floor/corner junctions — subtle darkening
-  • Contact shadows where furniture meets the textured wall (intensity: ${shadowInt})
+  • Contact shadows where furniture meets the textured wall
   • Surface relief: ${isBrick ? "each brick must show individual 3D depth — highlight on top edge, shadow on bottom edge, recessed mortar joints with micro-shadows" : "each panel with subtle edge shadows and visible gaps between panels"}
-  • Edge blending: ${blendNotes}
+  • Natural edge blending where texture meets non-textured areas
   • Match the room's color temperature, exposure, white balance, and noise/grain
   • Texture color must match image 4 (PRODUCT TEXTURE) — preserve the exact hue and tone
   • Everything outside the textured area = pixel-perfect identical to ORIGINAL
@@ -472,47 +452,6 @@ async function geminiRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T>
     }
   }
   throw last;
-}
-
-/* ── Scene lighting analysis (Phase 2b) ── */
-
-async function analyzeWallScene(
-  genAI: GoogleGenerativeAI,
-  originalBuf: Buffer,
-  compositeBuf: Buffer,
-  maskOverlayBuf: Buffer,
-): Promise<Record<string, unknown>> {
-  const defaults = {
-    lighting_direction: "diffuse",
-    lighting_temperature: "neutral",
-    ambient_level: 0.6,
-    shadow_intensity: "medium",
-    blend_notes: "natural fade at all edges",
-    texture_scale_looks_correct: true,
-    scale_adjustment_factor: 1.0,
-  };
-  const textModelId = process.env.GEMINI_TEXT_MODEL || "gemini-2.5-pro";
-  try {
-    const model = genAI.getGenerativeModel({ model: textModelId });
-    const result = await geminiRetry(() => model.generateContent([
-      { text: SCENE_ANALYSIS_PROMPT },
-      { inlineData: { mimeType: "image/jpeg", data: originalBuf.toString("base64") } },
-      { inlineData: { mimeType: "image/jpeg", data: compositeBuf.toString("base64") } },
-      { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuf.toString("base64") } },
-    ]));
-    const text = result.response.text?.() ?? "";
-    const clean = text.replace(/```(?:json)?\s*/g, "").replace(/```/g, "").trim();
-    const m = clean.match(/\{[\s\S]*\}/);
-    if (m) {
-      try {
-        const parsed = JSON.parse(m[0]);
-        return { ...defaults, ...parsed };
-      } catch { /* fall through */ }
-    }
-  } catch (e) {
-    console.warn("[render-final] Scene analysis failed (non-fatal):", e);
-  }
-  return defaults;
 }
 
 /* ── Masked composite (preserve non-wall areas from original) ── */
@@ -711,98 +650,63 @@ export async function POST(req: NextRequest) {
       const compositeB64 = "data:image/jpeg;base64," + compositeBuffer.toString("base64");
       timings.texture_project = Math.round((Date.now() - t2) / 100) / 10;
 
-      /* ── 9. PHASE 2b: Scene Lighting Analysis ── */
-      const t3 = Date.now();
-      const analysis = await analyzeWallScene(genAI, resizedImgBuffer, compositeBuffer, maskOverlayBuffer);
-
-      // If scene analysis suggests scale correction, re-tile
-      const scaleAdj = Number(analysis.scale_adjustment_factor || 1.0);
-      let finalCompositeBuffer = compositeBuffer;
-      let finalScaleReport = scaleReport;
-
-      if (scaleAdj !== 1.0 && scaleAdj >= 0.7 && scaleAdj <= 1.4 && analysis.texture_scale_looks_correct === false) {
-        console.log(`[render-final] Scale adjustment requested: ${scaleAdj}x`);
-        const adjDims = {
-          ...sceneDims,
-          wallHeightCm: Math.round(sceneDims.wallHeightCm * scaleAdj),
-          wallWidthCm: Math.round(sceneDims.wallWidthCm * scaleAdj),
-        };
-        const adjReport = computeTextureScale(
-          polyHeight, polyWidth,
-          texMeta.height!, texMeta.width!,
-          meta, adjDims,
-        );
-        let adjTileW = Math.max(Math.round(texMeta.width! * adjReport.scale), 1);
-        let adjTileH = Math.max(Math.round(texMeta.height! * adjReport.scale), 1);
-        let adjTilesX = Math.ceil(W / adjTileW);
-        let adjTilesY = Math.ceil(H / adjTileH);
-        if (adjTilesX * adjTilesY > MAX_TILES) {
-          const factor = Math.sqrt((adjTilesX * adjTilesY) / MAX_TILES);
-          adjTileW = Math.round(adjTileW * factor);
-          adjTileH = Math.round(adjTileH * factor);
-          adjTilesX = Math.ceil(W / adjTileW);
-          adjTilesY = Math.ceil(H / adjTileH);
-        }
-        const adjScaledTex = await sharp(textureFileBuffer).resize(adjTileW, adjTileH).toBuffer();
-        const adjTileOps: sharp.OverlayOptions[] = [];
-        for (let y = 0; y < H; y += adjTileH) {
-          for (let x = 0; x < W; x += adjTileW) {
-            adjTileOps.push({ input: adjScaledTex, left: x, top: y });
-          }
-        }
-        const adjTiled = await sharp({
-          create: { width: W, height: H, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 255 } },
-        }).composite(adjTileOps).png().toBuffer();
-        const adjMasked = await sharp(adjTiled)
-          .composite([{ input: maskPng, blend: "dest-in" }])
-          .png()
-          .toBuffer();
-        finalCompositeBuffer = await sharp(resizedImgBuffer)
-          .composite([{ input: adjMasked }])
-          .jpeg({ quality: 92 })
-          .toBuffer();
-        finalScaleReport = adjReport;
-        console.log("[render-final] Adjusted scale report:", JSON.stringify(adjReport));
-      }
-
-      timings.scene_analysis = Math.round((Date.now() - t3) / 100) / 10;
-
-      /* ── 10. PHASE 3: Gemini Photorealistic Render ── */
+      /* ── 9. PHASE 3: Gemini Photorealistic Render ── */
       const t4 = Date.now();
-      const imageModelId = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-preview-image-generation";
+      const imageModelId = process.env.GEMINI_IMAGE_MODEL || "gemini-2.0-flash-exp";
       let geminiModel = imageModelId;
-      let refinedB64 = "data:image/jpeg;base64," + finalCompositeBuffer.toString("base64");
+      let refinedB64 = compositeB64;
 
-      try {
-        const imageModel = genAI.getGenerativeModel({
-          model: imageModelId,
-          generationConfig: { temperature: 0.2 } as Record<string, unknown>,
-        });
-        const prompt = buildRenderPrompt(meta.name || product_id, meta, analysis, finalScaleReport, sceneDims);
-        const result = await geminiRetry(() => imageModel.generateContent([
-          { text: prompt },
-          { inlineData: { mimeType: "image/jpeg", data: resizedImgBuffer.toString("base64") } },
-          { inlineData: { mimeType: "image/jpeg", data: finalCompositeBuffer.toString("base64") } },
-          { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuffer.toString("base64") } },
-          { inlineData: { mimeType: "image/jpeg", data: textureFileBuffer.toString("base64") } },
-        ]));
+      const prompt = buildRenderPrompt(meta.name || product_id, meta, scaleReport, sceneDims);
+      const inputParts = [
+        { text: prompt },
+        { inlineData: { mimeType: "image/jpeg", data: resizedImgBuffer.toString("base64") } },
+        { inlineData: { mimeType: "image/jpeg", data: compositeBuffer.toString("base64") } },
+        { inlineData: { mimeType: "image/jpeg", data: maskOverlayBuffer.toString("base64") } },
+        { inlineData: { mimeType: "image/jpeg", data: textureFileBuffer.toString("base64") } },
+      ];
 
-        const parts = result.response.candidates?.[0]?.content?.parts;
-        const imagePart = parts?.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData);
+      // Try with responseModalities first (needed for gemini-2.0-flash-exp),
+      // fall back to plain config (works for gemini-*-image-preview models)
+      for (const attempt of [1, 2] as const) {
+        try {
+          const genConfig = attempt === 1
+            ? { responseModalities: ["Text", "Image"], temperature: 0.2 }
+            : { temperature: 0.2 };
+          const imageModel = genAI.getGenerativeModel({
+            model: imageModelId,
+            generationConfig: genConfig as Record<string, unknown>,
+          });
+          const result = await geminiRetry(() => imageModel.generateContent(inputParts), 2);
 
-        if (imagePart?.inlineData) {
-          const renderedBuf = Buffer.from(imagePart.inlineData.data, "base64");
-          const safeOutput = await maskedComposite(resizedImgBuffer, renderedBuf, grayMaskPng, W, H);
-          refinedB64 = `data:image/jpeg;base64,${safeOutput.toString("base64")}`;
+          const parts = result.response.candidates?.[0]?.content?.parts;
+          const imagePart = parts?.find((p: { inlineData?: { mimeType: string; data: string } }) => p.inlineData);
+
+          if (imagePart?.inlineData) {
+            const renderedBuf = Buffer.from(imagePart.inlineData.data, "base64");
+            const safeOutput = await maskedComposite(resizedImgBuffer, renderedBuf, grayMaskPng, W, H);
+            refinedB64 = `data:image/jpeg;base64,${safeOutput.toString("base64")}`;
+            break;
+          }
+
+          if (attempt === 1) {
+            console.warn(`[render-final] Attempt ${attempt}: no image returned, retrying without responseModalities`);
+            continue;
+          }
+          console.warn("[render-final] Gemini returned no image in either attempt");
+          geminiModel = `no-image: ${imageModelId}`;
+        } catch (e) {
+          if (attempt === 1) {
+            console.warn(`[render-final] Attempt ${attempt} failed, trying fallback config:`, e instanceof Error ? e.message : String(e));
+            continue;
+          }
+          console.error("[render-final] Gemini render failed:", e);
+          geminiModel = `error: ${e instanceof Error ? e.message : String(e)}`;
         }
-      } catch (e) {
-        console.error("[render-final] Gemini render failed:", e);
-        geminiModel = `error: ${e instanceof Error ? e.message : String(e)}`;
       }
 
       timings.gemini_render = Math.round((Date.now() - t4) / 100) / 10;
 
-      /* ── 11. Watermark ── */
+      /* ── 10. Watermark ── */
       const refinedRaw = refinedB64.includes(",") ? refinedB64.split(",")[1] : refinedB64;
       const refinedBuf = Buffer.from(refinedRaw, "base64");
       const wmBuf = await applyWatermark(refinedBuf);
@@ -822,9 +726,9 @@ export async function POST(req: NextRequest) {
         scale: {
           wallHeightCm: sceneDims.wallHeightCm,
           wallWidthCm: sceneDims.wallWidthCm,
-          courses: finalScaleReport.expectedCoursesH,
-          unitsPerRow: finalScaleReport.expectedUnitsW,
-          dimensionSource: finalScaleReport.dimensionSource,
+          courses: scaleReport.expectedCoursesH,
+          unitsPerRow: scaleReport.expectedUnitsW,
+          dimensionSource: scaleReport.dimensionSource,
           sceneType: sceneDims.sceneType,
           referenceObjects: sceneDims.referenceObjects.map(r => r.name),
         },
