@@ -1,17 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { getClientIp, getRemainingForIp } from "../rate-limit";
 
-/**
- * GET /api/remaining-generations
- *
- * On Vercel (no FastAPI backend): returns unlimited.
- * Locally: the FastAPI backend handles this via next.config rewrites,
- * so this route is only reached when FastAPI is unavailable.
- */
-export async function GET() {
-  return NextResponse.json({
-    remaining: -1,
-    limit: 0,
-    used: 0,
-    unlimited: true,
-  });
+export async function GET(req: NextRequest) {
+  const ip = getClientIp(req);
+  const info = getRemainingForIp(ip);
+  return NextResponse.json(info);
 }

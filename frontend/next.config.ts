@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
-const traceAssets = ["../assets/textures/stegu/**/*"];
+const traceAssets = [
+  "../assets/textures/stegu/**/*",
+  "../../assets/textures/stegu/**/*",
+];
+const traceWatermark = ["./public/watermark.png"];
 
 /** Prefer IPv4 loopback — fewer connection issues than localhost → ::1 on some hosts. */
 function normalizeApiProxyUrl(url: string): string {
@@ -18,7 +22,7 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/products": traceAssets,
     "/api/textures/[productId]": traceAssets,
-    "/api/render-final": traceAssets,
+    "/api/render-final": [...traceAssets, ...traceWatermark],
   },
   async rewrites() {
     const apiUrl = process.env.API_PROXY_URL;

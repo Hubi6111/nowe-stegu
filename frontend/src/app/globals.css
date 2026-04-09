@@ -6,6 +6,7 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-tap-highlight-color: transparent;
 }
 
 @keyframes fade-in {
@@ -24,27 +25,58 @@ html {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
 }
-@keyframes pulse-ring {
-  0%   { transform: scale(1); opacity: 0.5; }
-  100% { transform: scale(1.8); opacity: 0; }
-}
 @keyframes spin-slow {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
+}
+@keyframes loader-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes loader-spin-reverse {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(-360deg); }
+}
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .animate-fade-in     { animation: fade-in 0.4s ease-out both; }
 .animate-fade-in-up  { animation: fade-in-up 0.5s ease-out both; }
 .animate-scale-in    { animation: scale-in 0.35s ease-out both; }
+.animate-slide-up    { animation: slide-up 0.35s cubic-bezier(0.22,1,0.36,1) both; }
 .animate-shimmer {
   background: linear-gradient(90deg, #f5f5f0 25%, #e7e5e0 50%, #f5f5f0 75%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
 .animate-spin-slow { animation: spin-slow 3s linear infinite; }
+.animate-loader-spin { animation: loader-spin 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.animate-loader-spin-reverse { animation: loader-spin-reverse 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+@keyframes orbit {
+  from { transform: rotate(0deg) translateX(22px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(22px) rotate(-360deg); }
+}
+@keyframes orbit-reverse {
+  from { transform: rotate(0deg) translateX(16px) rotate(0deg); }
+  to   { transform: rotate(-360deg) translateX(16px) rotate(360deg); }
+}
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.4; transform: scale(0.85); }
+  50%      { opacity: 1;   transform: scale(1); }
+}
+.animate-orbit         { animation: orbit 2.4s linear infinite; }
+.animate-orbit-reverse { animation: orbit-reverse 3.2s linear infinite; }
+.animate-pulse-glow    { animation: pulse-glow 2s ease-in-out infinite; }
 
 .stegu-gradient {
-  background: linear-gradient(135deg, #1a1a1a 0%, #2d1515 40%, #3d1a1a 100%);
+  background: linear-gradient(135deg, #faf9f7 0%, #f5f0ed 50%, #f0ebe7 100%);
+  border-bottom: 1px solid #e7e0da;
 }
-.stegu-accent { color: #A01B1B; }
-.stegu-accent-bg { background-color: #A01B1B; }
+
+.scrollbar-thin::-webkit-scrollbar { width: 5px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 99px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #a8a29e; }

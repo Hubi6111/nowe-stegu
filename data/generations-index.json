@@ -1,5 +1,33 @@
 [
   {
+    "id": "20260409-022024-bac328",
+    "timestamp": "2026-04-09 02:20:24",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.16,
+      "gemini_render": 52.42,
+      "total": 52.61
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260409-021516-b20887",
+    "timestamp": "2026-04-09 02:15:16",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "gemini-3.1-flash-image-preview",
+    "timings": {
+      "texture_project": 0.4,
+      "gemini_render": 80.3,
+      "total": 80.76
+    },
+    "has_image": true
+  },
+  {
     "id": "20260408-024148-d12d6f",
     "timestamp": "2026-04-08 02:41:48",
     "client_ip": "127.0.0.1",

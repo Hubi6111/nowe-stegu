@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
 
+const DEFAULT_SHOP_URL = "https://stegu.pl/produkty/plytki-ceglopodobne/";
+
 interface ProductMetadata {
   name: string;
   moduleWidthMm: number;
@@ -9,11 +11,13 @@ interface ProductMetadata {
   jointMm: number;
   layoutType: string;
   offsetRatio: number;
+  shopUrl?: string;
 }
 
 interface Product extends ProductMetadata {
   productId: string;
   textureImage: string;
+  shopUrl: string;
 }
 
 const REQUIRED_FIELDS: (keyof ProductMetadata)[] = [
@@ -89,6 +93,7 @@ export async function GET() {
         jointMm: raw.jointMm,
         layoutType: raw.layoutType,
         offsetRatio: raw.offsetRatio,
+        shopUrl: raw.shopUrl || DEFAULT_SHOP_URL,
       });
     } catch {
       errors.push(`Invalid JSON in ${folder.name}/metadata.json`);

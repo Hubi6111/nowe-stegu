@@ -16,6 +16,7 @@ interface TextureMeta {
   offsetRatio?: number;
   textureScaleMultiplier?: number;
   albedoBrickCourses?: number;
+  shopUrl?: string;
   tags?: string[];
   [key: string]: unknown;
 }
@@ -214,8 +215,9 @@ function StatsPanel({ pwd }: { pwd: string }) {
 
 // ── Textures Panel ────────────────────────────────────────────────────────────
 
-const META_FIELDS: { key: string; label: string; type: "text" | "number"; step?: number }[] = [
+const META_FIELDS: { key: string; label: string; type: "text" | "number"; step?: number; placeholder?: string }[] = [
   { key: "name", label: "Nazwa", type: "text" },
+  { key: "shopUrl", label: "Link do sklepu (URL)", type: "text", placeholder: "https://stegu.pl/produkty/..." },
   { key: "moduleWidthMm", label: "Szer. modułu (mm)", type: "number" },
   { key: "moduleHeightMm", label: "Wys. modułu (mm)", type: "number" },
   { key: "jointMm", label: "Fuga (mm)", type: "number" },
@@ -298,7 +300,7 @@ function TexturesPanel({ pwd }: { pwd: string }) {
                       {META_FIELDS.map(f => (
                         <div key={f.key}>
                           <label className="text-[9px] font-medium text-stone-500 uppercase tracking-wide">{f.label}</label>
-                          <input type={f.type} step={f.step} value={String(editMeta[f.key] ?? "")} onChange={e => setField(f.key, e.target.value, f.type)} className="w-full px-2.5 py-1.5 text-xs border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#A01B1B]/50" />
+                          <input type={f.type} step={f.step} placeholder={f.placeholder} value={String(editMeta[f.key] ?? "")} onChange={e => setField(f.key, e.target.value, f.type)} className="w-full px-2.5 py-1.5 text-xs border border-stone-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-[#A01B1B]/50" />
                         </div>
                       ))}
                       <div>
@@ -337,6 +339,11 @@ function TexturesPanel({ pwd }: { pwd: string }) {
                         {t.meta.jointMm !== undefined && <span className="mr-2">fuga {t.meta.jointMm}mm</span>}
                         {t.meta.layoutType && <span>{t.meta.layoutType}</span>}
                       </div>
+                      {t.meta.shopUrl && (
+                        <a href={String(t.meta.shopUrl)} target="_blank" rel="noopener noreferrer" className="text-[9px] text-[#A01B1B] hover:underline truncate block mt-0.5 max-w-full">
+                          {String(t.meta.shopUrl).replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                        </a>
+                      )}
                       <div className="flex gap-2 mt-2">
                         <button onClick={() => startEdit(t)} className="text-[10px] font-medium hover:underline cursor-pointer" style={{ color: RED }}>Edytuj</button>
                         <button onClick={() => handleDelete(t.id)} className="text-[10px] text-red-400 hover:text-red-600 cursor-pointer">Usuń</button>
@@ -400,9 +407,9 @@ function AddTextureForm({ pwd, onDone }: { pwd: string; onDone: () => void }) {
           <input value={id} onChange={e => setId(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))} className="w-full px-3 py-2 text-xs border rounded-lg" placeholder="moja-tekstura" />
         </div>
         {META_FIELDS.map(f => (
-          <div key={f.key}>
+          <div key={f.key} className={f.key === "shopUrl" ? "sm:col-span-2 lg:col-span-3" : ""}>
             <label className="text-[9px] font-medium text-stone-500 uppercase tracking-wide block mb-1">{f.label}</label>
-            <input type={f.type} step={f.step} value={String(meta[f.key] ?? "")} onChange={e => setField(f.key, e.target.value, f.type)} className="w-full px-3 py-2 text-xs border rounded-lg" />
+            <input type={f.type} step={f.step} placeholder={f.placeholder} value={String(meta[f.key] ?? "")} onChange={e => setField(f.key, e.target.value, f.type)} className="w-full px-3 py-2 text-xs border rounded-lg" />
           </div>
         ))}
         <div>

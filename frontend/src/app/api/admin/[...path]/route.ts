@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
+import { getStats, getGenerations, getLimitsData } from "../../rate-limit";
 
 const DEFAULT_HASH = crypto
   .createHash("sha256")
@@ -135,6 +136,18 @@ export async function GET(
   const route = segments.join("/");
 
   if (route === "watermark/preview") {
+    const wmCandidates = [
+      path.join(process.cwd(), "public", "watermark.png"),
+      path.join(process.cwd(), "..", "public", "watermark.png"),
+    ];
+    for (const p of wmCandidates) {
+      if (fs.existsSync(p)) {
+        const buf = fs.readFileSync(p);
+        return new NextResponse(buf, {
+          headers: { "Content-Type": "image/png", "Cache-Control": "public, max-age=3600" },
+        });
+      }
+    }
     return NextResponse.json({ detail: "Brak watermarku" }, { status: 404 });
   }
 
@@ -146,39 +159,31 @@ export async function GET(
   }
 
   if (route === "stats") {
-    return NextResponse.json({
-      total: 0,
-      today: 0,
-      unique_ips: 0,
-      by_product: {},
-      by_day: {},
-      daily_limit: 0,
-      usage_today: { date: new Date().toISOString().slice(0, 10), users: {}, total: 0 },
-    });
+    return NextResponse.json(getStats());
   }
 
   if (route === "generations") {
-    return NextResponse.json({
-      total: 0,
-      offset: 0,
-      limit: 50,
-      items: [],
-    });
+    const url = new URL(req.url);
+    const offset = Number(url.searchParams.get("offset") || 0);
+    const limit = Number(url.searchParams.get("limit") || 50);
+    const filterIp = url.searchParams.get("client_ip") || undefined;
+    return NextResponse.json(getGenerations(offset, limit, filterIp));
   }
 
   if (route === "watermark") {
+    const wmExists = [
+      path.join(process.cwd(), "public", "watermark.png"),
+      path.join(process.cwd(), "..", "public", "watermark.png"),
+    ].some((p) => fs.existsSync(p));
     return NextResponse.json({
-      enabled: false,
+      enabled: wmExists,
       opacity: 0.3,
-      has_file: false,
+      has_file: wmExists,
     });
   }
 
   if (route === "limits") {
-    return NextResponse.json({
-      daily_limit: 0,
-      usage: { date: new Date().toISOString().slice(0, 10), users: {}, total: 0 },
-    });
+    return NextResponse.json(getLimitsData());
   }
 
   return NextResponse.json({ detail: "Not found" }, { status: 404 });
@@ -195,18 +200,39 @@ export async function PUT(
   const route = segments.join("/");
 
   if (route === "watermark") {
-    return NextResponse.json({ enabled: false, opacity: 0.3, has_file: false });
+    const wmExists = [
+      path.join(process.cwd(), "public", "watermark.png"),
+      path.join(process.cwd(), "..", "public", "watermark.png"),
+    ].some((p) => fs.existsSync(p));
+    return NextResponse.json({ enabled: wmExists, opacity: 0.3, has_file: wmExists });
   }
 
   if (route === "limits") {
-    return NextResponse.json({ daily_limit: 0 });
+    return NextResponse.json(getLimitsData());
   }
 
   if (route.startsWith("textures/")) {
-    return NextResponse.json(
-      { detail: "Edycja tekstur niedostępna na Vercel" },
-      { status: 501 }
-    );
+    const textureId = route.slice("textures/".length);
+    const dir = getTexturesDir();
+    if (!dir) {
+      return NextResponse.json({ detail: "Brak katalogu tekstur" }, { status: 404 });
+    }
+    const metaPath = path.join(dir, textureId, "metadata.json");
+    if (!fs.existsSync(path.join(dir, textureId))) {
+      return NextResponse.json({ detail: "Tekstura nie istnieje" }, { status: 404 });
+    }
+    try {
+      const body = await req.json();
+      // Read existing metadata and merge
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(fs.readFileSync(metaPath, "utf-8")); } catch {}
+      const updated = { ...existing, ...body };
+      fs.writeFileSync(metaPath, JSON.stringify(updated, null, 2), "utf-8");
+      return NextResponse.json({ ok: true, meta: updated });
+    } catch (e) {
+      // On Vercel the filesystem is read-only; return success anyway so UI doesn't break
+      return NextResponse.json({ ok: false, detail: String(e) }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ detail: "Not found" }, { status: 404 });

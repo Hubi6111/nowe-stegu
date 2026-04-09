@@ -13,7 +13,8 @@ interface RectangleDrawerProps {
   onStageSizeChange?: (size: { width: number; height: number }) => void;
 }
 
-const HANDLE_R = 8;
+const IS_TOUCH = typeof window !== "undefined" && "ontouchstart" in window;
+const HANDLE_R = IS_TOUCH ? 11 : 8;
 const STEGU_RED = "#A01B1B";
 const STEGU_RED_DARK = "#7A1515";
 const EDGE_COLOR = "rgba(160, 27, 27, 0.75)";
@@ -43,13 +44,15 @@ export default function RectangleDrawer({
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [cursorPos, setCursorPos] = useState<Point | null>(null);
 
+  const [hoverPos, setHoverPos] = useState<Point | null>(null);
   const isInteracting = drawing || draggingIdx !== null;
+  const hasNoRect = points.length < 2;
 
   const fitImage = useCallback((img: HTMLImageElement) => {
-    const containerW = containerRef.current?.clientWidth || 900;
-    const maxW = Math.min(containerW - 4, 900);
-    const maxH = window.innerHeight * 0.55;
-    const s = Math.min(maxW / img.width, maxH / img.height, 1);
+    const containerW = containerRef.current?.clientWidth || window.innerWidth - 24;
+    const maxW = Math.min(containerW, 1200);
+    // Always scale to fit width; height follows proportionally
+    const s = maxW / img.width;
     const newSize = { width: Math.round(img.width * s), height: Math.round(img.height * s) };
     setStageSize(newSize);
     onStageSizeChange?.(newSize);
@@ -60,7 +63,13 @@ export default function RectangleDrawer({
     setImage(null);
     setLoadError(false);
     const img = new window.Image();
-    img.onload = () => { imgRef.current = img; fitImage(img); setImage(img); };
+    img.onload = () => {
+      imgRef.current = img;
+      fitImage(img);
+      setImage(img);
+      // Refit after layout settles (container may not have correct width on first call)
+      requestAnimationFrame(() => { fitImage(img); });
+    };
     img.onerror = () => setLoadError(true);
     img.src = imageSrc;
   }, [imageSrc, fitImage]);
@@ -98,6 +107,7 @@ export default function RectangleDrawer({
 
   // ── Draw: mousedown → drag → mouseup ──
   const handleMouseDown = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (e.evt?.cancelable) e.evt.preventDefault();
     const isOnCanvas = e.target === e.target.getStage() || e.target.getClassName() === "Image";
     if (!isOnCanvas) return;
     const pos = getStagePos(e);
@@ -109,16 +119,20 @@ export default function RectangleDrawer({
   }, [getStagePos]);
 
   const handleMouseMove = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (e.evt?.cancelable) e.evt.preventDefault();
     const pos = getStagePos(e);
     if (!pos) return;
     if (drawing && drawOrigin) {
       const clamped = clamp(pos);
       setDrawCurrent(clamped);
       setCursorPos(clamped);
+    } else if (!drawing && !draggingIdx) {
+      setHoverPos(pos);
     }
-  }, [drawing, drawOrigin, getStagePos, clamp]);
+  }, [drawing, drawOrigin, draggingIdx, getStagePos, clamp]);
 
-  const handleMouseUp = useCallback(() => {
+  const handleMouseUp = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (e.evt?.cancelable) e.evt.preventDefault();
     if (drawing && drawOrigin && drawCurrent) {
       const r = rectFromPts(drawOrigin, drawCurrent);
       if (r.w > 5 && r.h > 5) {
@@ -175,7 +189,7 @@ export default function RectangleDrawer({
   }
 
   return (
-    <div ref={containerRef} className="relative inline-block select-none">
+    <div ref={containerRef} className="relative select-none w-full flex justify-center">
       <Stage
         ref={stageRef}
         width={stageSize.width}
@@ -186,8 +200,9 @@ export default function RectangleDrawer({
         onTouchMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onTouchEnd={handleMouseUp}
+        onMouseLeave={() => setHoverPos(null)}
         className="rounded-2xl overflow-hidden border border-stone-200 cursor-crosshair touch-none"
-        style={{ background: "#F5F5F0" }}
+        style={{ background: "#F5F5F0", touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" } as React.CSSProperties}
       >
         <Layer>
           <KonvaImage image={image} width={stageSize.width} height={stageSize.height} />
@@ -211,7 +226,7 @@ export default function RectangleDrawer({
               stroke="white" strokeWidth={2.5}
               shadowColor="rgba(0,0,0,0.3)" shadowBlur={5} shadowOffsetY={2}
               draggable
-              hitStrokeWidth={24}
+              hitStrokeWidth={IS_TOUCH ? 36 : 24}
               onDragStart={() => { setDraggingIdx(i); setCursorPos(pt); }}
               onDragMove={(e) => handleCornerDrag(i, e.target.x(), e.target.y())}
               onDragEnd={(e) => {
@@ -232,9 +247,11 @@ export default function RectangleDrawer({
         </Layer>
       </Stage>
 
-      {/* Zoom lens following cursor */}
       {isInteracting && cursorPos && image && (
         <ZoomLens image={image} point={cursorPos} stageSize={stageSize} />
+      )}
+      {!isInteracting && hasNoRect && hoverPos && image && !IS_TOUCH && (
+        <ZoomLens image={image} point={hoverPos} stageSize={stageSize} />
       )}
     </div>
   );
