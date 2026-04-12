@@ -1,11 +1,19 @@
 {
   "name": "Monsanto 2",
-  "moduleWidthMm": 245,
-  "moduleHeightMm": 80,
+  "category": "stone",
+  "materialType": "decorative stone cladding",
+  "tileWidthMm": 612,
+  "tileHeightMm": 480,
+  "moduleWidthMm": 180,
+  "moduleHeightMm": 85,
   "jointMm": 10,
-  "layoutType": "running-bond",
-  "offsetRatio": 0.5,
+  "layoutType": "random-stone",
+  "offsetRatio": 0.33,
   "textureScaleMultiplier": 1.0,
-  "albedoBrickCourses": 8,
-  "shopUrl": "https://stegu.pl/produkty/plytki-ceglopodobne/"
+  "albedoBrickCourses": 5,
+  "roughness": 0.80,
+  "bumpDepthMm": 10,
+  "specularIntensity": 0.06,
+  "surfaceDescription": "Natural stone with rough irregular surface geometry, deep relief with mixed stone sizes, completely matte and light-absorbing, visible mortar between stones 8-10mm deep with natural tonal variation",
+  "shopUrl": "https://stegu.pl/produkty/kamien-dekoracyjny/"
 }

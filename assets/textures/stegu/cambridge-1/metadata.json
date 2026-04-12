@@ -1,11 +1,19 @@
 {
   "name": "Cambridge 1",
-  "moduleWidthMm": 245.0,
-  "moduleHeightMm": 80.0,
-  "jointMm": 10.0,
+  "category": "brick",
+  "materialType": "decorative brick cladding",
+  "tileWidthMm": 1744,
+  "tileHeightMm": 624,
+  "moduleWidthMm": 245,
+  "moduleHeightMm": 65,
+  "jointMm": 10,
   "layoutType": "running-bond",
   "offsetRatio": 0.5,
   "textureScaleMultiplier": 1.0,
   "albedoBrickCourses": 8,
+  "roughness": 0.70,
+  "bumpDepthMm": 5,
+  "specularIntensity": 0.05,
+  "surfaceDescription": "Pressed clay brick with slight surface texture and subtle color variation between bricks, near-matte finish with minimal light reflection, mortar joints are smooth and recessed 3-5mm",
   "shopUrl": "https://stegu.pl/produkty/plytki-ceglopodobne/"
 }

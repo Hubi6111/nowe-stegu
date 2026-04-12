@@ -18,6 +18,7 @@ from fastapi import Request
 from services.gemini import (
     analyze_wall_scene,
     generate_photorealistic_render,
+    verify_and_correct_render,
     image_model_name,
     refine_image,
     image_to_b64,
@@ -26,6 +27,7 @@ from services.texture import (
     polygon_to_mask,
     exclusions_to_mask,
     compute_final_mask,
+    refine_mask_with_boundaries,
     render_mask_overlay,
     project_texture,
     masked_composite,
@@ -278,7 +280,7 @@ async def render_final(req: RenderFinalRequest, request: Request):
         logger.error("render_final decode failed: %s", exc, exc_info=True)
         raise HTTPException(422, detail=f"Could not decode inputs: {exc}")
 
-    # ── Deterministic texture projection ─────────────────────────────────
+    # ── Deterministic texture projection (heuristic scale — for analysis) ─
     t1 = time.time()
     try:
         meta, texture = load_product(req.product_id)
@@ -293,25 +295,63 @@ async def render_final(req: RenderFinalRequest, request: Request):
         raise HTTPException(500, detail=f"Texture projection failed: {exc}")
     results["timings"]["texture_project"] = round(time.time() - t1, 2)
 
-    # ── Mask overlay (orange highlight showing exact texture zone) ────────
-    # Full resolution for the render pass so Gemini sees precise boundaries
     mask_overlay = render_mask_overlay(
         image, final_mask, alpha=0.55, max_long_side=2048
     )
 
-    # ── Gemini photorealistic render ─────────────────────────────────────
+    # ── Stage 1: Gemini scene analysis (measurement + occlusion + lighting) ─
     t2 = time.time()
     if os.environ.get("GEMINI_API_KEY"):
         try:
             product_name = meta.get("name", req.product_id)
-            material_type = meta.get("layoutType", "decorative stone/brick")
+            material_type = meta.get("materialType", meta.get("layoutType", "decorative stone/brick"))
 
             analysis: dict = {}
             try:
                 analysis = analyze_wall_scene(image, composite, mask_overlay)
+                results["timings"]["scene_analysis"] = round(time.time() - t2, 2)
+                results["analysis"] = {
+                    "wallHeightCm": analysis.get("wallHeightCm"),
+                    "wallWidthCm": analysis.get("wallWidthCm"),
+                    "referenceObjects": [
+                        r.get("name") for r in analysis.get("referenceObjects", [])
+                    ],
+                    "occluders": [
+                        o.get("label") for o in analysis.get("occluders", [])
+                    ],
+                    "confidence": analysis.get("confidence"),
+                }
             except Exception as exc_a:
                 logger.warning("Gemini analysis failed (non-fatal): %s", exc_a)
 
+            # ── Refine mask with wall boundaries from analysis ────────────
+            wall_boundaries = analysis.get("wallBoundaries")
+            if wall_boundaries:
+                refined = refine_mask_with_boundaries(final_mask, wall_boundaries)
+                if refined.any() and not np.array_equal(refined, final_mask):
+                    logger.info(
+                        "Mask refined by wall boundaries — trimmed %d px",
+                        int(final_mask.sum() - refined.sum()),
+                    )
+                    final_mask = refined
+
+            # ── Re-tile with AI-calibrated dimensions ─────────────────────
+            t_retile = time.time()
+            try:
+                composite = project_texture(
+                    image, final_mask, texture, meta=meta,
+                    polygon=scaled_polygon, analysis=analysis,
+                )
+                results["composite"] = image_to_b64(composite)
+                mask_overlay = render_mask_overlay(
+                    image, final_mask, alpha=0.55, max_long_side=2048
+                )
+            except Exception as exc_rt:
+                logger.warning("Re-tile after analysis failed (non-fatal): %s", exc_rt)
+            results["timings"]["retile"] = round(time.time() - t_retile, 2)
+
+            # ── Stage 2: Photorealistic render ────────────────────────────
+            t3 = time.time()
             raw_rendered = generate_photorealistic_render(
                 original=image,
                 composite=composite,
@@ -322,12 +362,38 @@ async def render_final(req: RenderFinalRequest, request: Request):
                 material_type=material_type,
                 product_meta=meta,
             )
+            results["timings"]["render"] = round(time.time() - t3, 2)
+
             if raw_rendered:
-                # Safety net: clip Gemini output to our mask so objects outside
-                # the mask are ALWAYS preserved from the original photo.
-                final_output = masked_composite(
+                # Safety: clip to mask so areas outside the polygon are preserved
+                stage2_output = masked_composite(
                     image, raw_rendered, final_mask, feather_radius=3
                 )
+
+                # ── Stage 3: Verification & correction ────────────────────
+                t4 = time.time()
+                skip_verify = os.environ.get("SKIP_VERIFICATION", "").lower() in ("1", "true")
+                if not skip_verify:
+                    try:
+                        verified = verify_and_correct_render(
+                            original=image,
+                            rendered=stage2_output,
+                            mask_overlay=mask_overlay,
+                            product_texture=texture,
+                        )
+                        if verified:
+                            final_output = masked_composite(
+                                image, verified, final_mask, feather_radius=3
+                            )
+                        else:
+                            final_output = stage2_output
+                    except Exception as exc_v:
+                        logger.warning("Verification pass failed (non-fatal): %s", exc_v)
+                        final_output = stage2_output
+                else:
+                    final_output = stage2_output
+                results["timings"]["verification"] = round(time.time() - t4, 2)
+
                 results["refined"] = image_to_b64(final_output)
                 results["gemini_model"] = image_model_name()
             else:
@@ -340,7 +406,7 @@ async def render_final(req: RenderFinalRequest, request: Request):
     else:
         results["refined"] = results["composite"]
         results["gemini_model"] = "not-configured"
-    results["timings"]["gemini_render"] = round(time.time() - t2, 2)
+    results["timings"]["gemini_total"] = round(time.time() - t2, 2)
 
     # ── Watermark ─────────────────────────────────────────────────────────
     if results.get("refined"):

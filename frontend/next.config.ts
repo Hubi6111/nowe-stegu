@@ -28,14 +28,14 @@ const nextConfig: NextConfig = {
     const apiUrl = process.env.API_PROXY_URL;
     if (!apiUrl) return { beforeFiles: [], afterFiles: [], fallback: [] };
     const base = normalizeApiProxyUrl(apiUrl);
-    // afterFiles: local app/api/* routes (health, products, …) win first.
-    // beforeFiles would proxy /api/health to FastAPI and cause ECONNRESET when :8000 is down.
+    // fallback: Next.js checks ALL its own routes first (including dynamic [productId]).
+    // Only unmatched /api/* requests fall through to FastAPI proxy.
     return {
       beforeFiles: [],
-      afterFiles: [
+      afterFiles: [],
+      fallback: [
         { source: "/api/:path*", destination: `${base}/api/:path*` },
       ],
-      fallback: [],
     };
   },
 };

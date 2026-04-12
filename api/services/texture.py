@@ -83,6 +83,49 @@ def estimate_wall_span_mm(polygon_height_px: float, image_height_px: int) -> flo
     return max(950.0, base * max(frac / 0.50, 0.36))
 
 
+def refine_mask_with_boundaries(
+    mask: np.ndarray,
+    wall_boundaries: dict | None,
+) -> np.ndarray:
+    """Trim mask using wall boundary analysis from Gemini scene measurement.
+
+    Prevents texture from extending onto ceiling, floor, or adjacent walls
+    when the user's polygon selection overshoots the actual wall surface.
+    The boundary coordinates are normalised 0-1 relative to the full image.
+    """
+    if not wall_boundaries:
+        return mask
+
+    H, W = mask.shape
+    refined = mask.copy()
+
+    ceiling_y = wall_boundaries.get("ceilingLineY")
+    if wall_boundaries.get("selectionExceedsCeiling") and ceiling_y and 0 < ceiling_y < 1:
+        cut = max(0, int(ceiling_y * H))
+        refined[:cut, :] = 0
+
+    floor_y = wall_boundaries.get("floorLineY")
+    if wall_boundaries.get("selectionExceedsFloor") and floor_y and 0 < floor_y < 1:
+        cut = min(H, int(floor_y * H))
+        refined[cut:, :] = 0
+
+    left_x = wall_boundaries.get("leftEdgeX")
+    if wall_boundaries.get("selectionExceedsLeftWall") and left_x and 0 < left_x < 1:
+        cut = max(0, int(left_x * W))
+        refined[:, :cut] = 0
+
+    right_x = wall_boundaries.get("rightEdgeX")
+    if wall_boundaries.get("selectionExceedsRightWall") and right_x and 0 < right_x < 1:
+        cut = min(W, int(right_x * W))
+        refined[:, cut:] = 0
+
+    if not refined.any():
+        logger.warning("Wall boundary refinement removed all mask pixels — keeping original mask")
+        return mask
+
+    return refined
+
+
 def polygon_to_mask(
     polygon: list[dict], width: int, height: int
 ) -> np.ndarray:
@@ -222,31 +265,43 @@ def compute_texture_scale(
     image_height_px: int,
     texture_height_px: int,
     meta: dict,
+    analysis: dict | None = None,
 ) -> float:
-    """Map product mm + albedo height to on-screen tile scale (realistic brick size)."""
+    """Map product mm + albedo height to on-screen tile scale (realistic brick size).
+
+    If analysis (from Gemini scene measurement) is provided, uses the AI-calibrated
+    wall dimensions instead of the heuristic. This gives much more accurate sizing
+    since it's based on actual reference objects in the photo.
+    """
     module_h = float(meta.get("moduleHeightMm", 65))
     joint = float(meta.get("jointMm", 10))
     layout = meta.get("layoutType", "running-bond")
 
-    # How many brick courses the albedo image represents (metadata override).
     courses = int(meta.get("albedoBrickCourses", meta.get("albedoCourses", 8)))
     courses = max(1, min(courses, 32))
 
     if layout in ("running-bond", "stretcher-bond"):
         albedo_h_mm = module_h * courses + joint * max(courses - 1, 0)
     else:
-        # Panel / stack layouts: albedo is usually 1–2 module heights unless overridden
         planks = int(meta.get("albedoStackPlanks", meta.get("albedoPlankCount", 2)))
         planks = max(1, min(planks, 12))
         albedo_h_mm = module_h * planks + joint * max(planks - 1, 0)
 
-    wall_mm = estimate_wall_span_mm(polygon_height_px, image_height_px)
+    # Use AI-measured wall height when available and confident
+    if (analysis
+        and analysis.get("confidence") not in (None, "low")
+        and analysis.get("wallHeightCm")):
+        wall_mm = float(analysis["wallHeightCm"]) * 10.0
+        wall_mm = max(500.0, min(wall_mm, 12000.0))
+        logger.info("Using AI-measured wall height: %.0f mm", wall_mm)
+    else:
+        wall_mm = estimate_wall_span_mm(polygon_height_px, image_height_px)
+
     px_per_mm = polygon_height_px / wall_mm
 
     target_h_px = max(albedo_h_mm * px_per_mm, 1.0)
     scale = target_h_px / float(texture_height_px)
 
-    # Global / per-product fine-tuning (bricks still too big → < 1.0)
     mult = float(meta.get("textureScaleMultiplier", 1.0))
     env_m = os.environ.get("STEGU_TEXTURE_SCALE_MULTIPLIER")
     if env_m:
@@ -557,6 +612,7 @@ def project_texture(
     alpha: float = 0.995,
     feather_radius: int = 2,
     polygon: list[dict] | None = None,
+    analysis: dict | None = None,
 ) -> Image.Image:
     """Project a tiled texture onto the masked wall region.
 
@@ -579,7 +635,7 @@ def project_texture(
     poly_h = float(ys.max() - ys.min())
 
     if meta:
-        tex_scale = compute_texture_scale(poly_h, H, texture.height, meta)
+        tex_scale = compute_texture_scale(poly_h, H, texture.height, meta, analysis=analysis)
     else:
         wall_mm = estimate_wall_span_mm(poly_h, H)
         px_per_mm = poly_h / wall_mm

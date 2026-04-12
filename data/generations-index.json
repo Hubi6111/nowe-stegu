@@ -1,5 +1,215 @@
 [
   {
+    "id": "20260413-005425-57e509",
+    "timestamp": "2026-04-13 00:54:25",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.3,
+      "scene_analysis": 65.63,
+      "retile": 0.29,
+      "render": 21.2,
+      "verification": 20.79,
+      "gemini_total": 108.05,
+      "total": 108.37
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-004642-aa3999",
+    "timestamp": "2026-04-13 00:46:42",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.12,
+      "scene_analysis": 21.03,
+      "retile": 0.1,
+      "render": 20.24,
+      "verification": 16.0,
+      "gemini_total": 57.4,
+      "total": 57.53
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-230319-00bcd7",
+    "timestamp": "2026-04-12 23:03:19",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.33,
+      "scene_analysis": 51.85,
+      "retile": 0.31,
+      "render": 24.72,
+      "verification": 16.84,
+      "gemini_total": 93.84,
+      "total": 94.2
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-225323-3df441",
+    "timestamp": "2026-04-12 22:53:23",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.4,
+      "scene_analysis": 59.16,
+      "retile": 0.39,
+      "render": 23.37,
+      "verification": 23.98,
+      "gemini_total": 107.06,
+      "total": 107.49
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-225102-d91bda",
+    "timestamp": "2026-04-12 22:51:02",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.31,
+      "scene_analysis": 71.28,
+      "retile": 0.34,
+      "render": 38.95,
+      "verification": 19.86,
+      "gemini_total": 130.59,
+      "total": 130.93
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-224626-84add1",
+    "timestamp": "2026-04-12 22:46:26",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.37,
+      "scene_analysis": 65.29,
+      "retile": 0.34,
+      "render": 23.69,
+      "verification": 17.87,
+      "gemini_total": 107.35,
+      "total": 107.75
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-214220-69af09",
+    "timestamp": "2026-04-12 21:42:20",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.34,
+      "scene_analysis": 51.37,
+      "retile": 0.32,
+      "render": 20.44,
+      "verification": 23.86,
+      "gemini_total": 96.13,
+      "total": 96.5
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-214002-3b8377",
+    "timestamp": "2026-04-12 21:40:02",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.32,
+      "scene_analysis": 64.59,
+      "retile": 0.29,
+      "render": 20.92,
+      "verification": 19.85,
+      "gemini_total": 105.79,
+      "total": 106.15
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-162241-a8c4be",
+    "timestamp": "2026-04-12 16:22:41",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.39,
+      "scene_analysis": 47.91,
+      "retile": 0.31,
+      "render": 20.67,
+      "verification": 8.78,
+      "gemini_total": 77.8,
+      "total": 78.24
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-040902-7bbd83",
+    "timestamp": "2026-04-12 04:09:02",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.31,
+      "scene_analysis": 53.31,
+      "render": 16.29,
+      "verification": 19.65,
+      "gemini_total": 89.39,
+      "total": 89.73
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-040706-6b9738",
+    "timestamp": "2026-04-12 04:07:06",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.37,
+      "scene_analysis": 49.14,
+      "render": 19.95,
+      "verification": 18.91,
+      "gemini_total": 88.14,
+      "total": 88.57
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260412-000616-05ca89",
+    "timestamp": "2026-04-12 00:06:16",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.47,
+      "gemini_render": 45.93,
+      "total": 46.44
+    },
+    "has_image": true
+  },
+  {
     "id": "20260409-030944-b41708",
     "timestamp": "2026-04-09 03:09:44",
     "client_ip": "127.0.0.1",
