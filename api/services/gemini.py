@@ -673,42 +673,32 @@ def _build_dimension_instructions(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RENDER_PROMPT_TEMPLATE = """\
-You receive 3 images. Produce one photorealistic result.
+You receive 3 images:
 
-IMAGE 1 — "BEZ AI": Room photo with "{product_name}" ({material_type}) \
-texture already placed on the wall. The texture position, size, scale, \
-and tiling are CORRECT. Use this as your BASE.
+IMAGE 1 — "BEZ AI": The original room with "{product_name}" ({material_type}) \
+texture overlaid on the wall. Shows exact texture position, size, and tiling.
 
-IMAGE 2 — ORIGINAL: The same room WITHOUT the texture. Use this for:
-  • Lighting and shadows reference
-  • All objects that should appear IN FRONT of the texture
-  • All surfaces that are NOT the wall (ceiling, floor, other walls)
+IMAGE 2 — ORIGINAL: The room without any texture.
 
-IMAGE 3 — TEXTURE SWATCH: Close-up photo of the actual "{product_name}" \
-material. This is what the texture should LOOK LIKE on the wall.
+IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material.
 
-WHAT TO DO:
-  1. Start from IMAGE 1 (the "Bez AI" composite)
-  2. The texture is already in the right place and at the right size — \
-KEEP IT EXACTLY THERE, do not move or resize it
-  3. Make the texture look like IMAGE 3 — same colors, same grain, \
-same surface detail
-  4. Apply the lighting from IMAGE 2 subtly (slight brightness changes \
-only — do NOT change the texture colors)
-  5. Put back ALL objects that are in front of the wall — copy them \
-from IMAGE 2: furniture, TV, shelves, plants, lamps, switches, frames, \
-cables, people — everything that was between the camera and the wall
-  6. Make sure the texture does NOT cover the ceiling, floor, other walls, \
-baseboards, door frames, or window frames — those must look like IMAGE 2
+CREATE: The ORIGINAL photo (IMAGE 2) with the texture placed on the wall \
+exactly like in IMAGE 1 ("Bez AI") — same position, same size, same tiling. \
+The texture must look like IMAGE 3 (same colors, grain, detail).
 
-RULES:
-  ⛔ Texture SIZE and POSITION = exactly like IMAGE 1
-  ⛔ Texture APPEARANCE = exactly like IMAGE 3
-  ⛔ Everything that is NOT the textured wall = exactly like IMAGE 2
-  ⛔ Do NOT crop, zoom, resize, or change the framing
-  ⛔ Do NOT re-tile or re-draw the texture
+The texture must NOT cover anything that is not the wall surface:
+  • Furniture, TV, shelves, plants, lamps, frames, switches, cables, \
+people — anything in front of the wall must be fully visible
+  • Ceiling, floor, baseboards, door frames, window frames, other walls \
+— must look exactly like IMAGE 2
 
-Output ONLY the image. No text.
+Only the wall surface gets the texture. Everything else = IMAGE 2 exactly.
+
+⛔ Do NOT change texture size/position from IMAGE 1
+⛔ Do NOT crop, zoom, or resize
+⛔ Do NOT re-tile or re-draw the texture
+
+Output ONLY the image.
 """
 
 
