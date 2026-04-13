@@ -1,4 +1,4 @@
-"""Pipeline — wall mask detection (user polygon) and deterministic texture projection."""
+"""Pipeline — smart wall masking (CV engine) + deterministic texture projection."""
 
 import base64
 import io
@@ -8,6 +8,7 @@ import os
 import time
 from pathlib import Path
 
+import httpx
 import numpy as np
 from fastapi import APIRouter, HTTPException
 from PIL import Image, ImageDraw as PILImageDraw
@@ -39,6 +40,8 @@ from services.admin_store import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+CV_ENGINE_URL = os.environ.get("CV_ENGINE_URL", "http://localhost:8001")
 
 
 def _apply_watermark(img: Image.Image) -> Image.Image:
@@ -194,6 +197,74 @@ async def remaining_generations(request: Request):
         return {"remaining": -1, "limit": 0, "used": 0, "unlimited": True}
     _, used, _ = check_rate_limit(client_ip)
     return {"remaining": max(0, limit - used), "limit": limit, "used": used, "unlimited": False}
+
+
+@router.post("/api/smart-mask")
+async def smart_mask(req: DetectMaskRequest):
+    """Smart wall masking via CV Engine (SegFormer + SAM2 + GroundingDINO).
+
+    Takes the same polygon selection as detect-mask, but calls cv-engine
+    to produce a wall-only mask that excludes ceiling, floor, and foreground objects.
+    """
+    t0 = time.time()
+    try:
+        canvas_w = max(int(req.canvas_width), 1)
+        canvas_h = max(int(req.canvas_height), 1)
+        image = decode_image(req.image)
+        sx = image.width / canvas_w
+        sy = image.height / canvas_h
+
+        # Convert polygon points to image-space bounding box
+        scaled_polygon = [{"x": p.x * sx, "y": p.y * sy} for p in req.polygon]
+        xs = [p["x"] for p in scaled_polygon]
+        ys = [p["y"] for p in scaled_polygon]
+        box = {
+            "x1": max(0, min(xs)),
+            "y1": max(0, min(ys)),
+            "x2": min(image.width, max(xs)),
+            "y2": min(image.height, max(ys)),
+        }
+
+        # Call cv-engine
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                f"{CV_ENGINE_URL}/wall-mask",
+                json={"image": req.image, "box": box},
+            )
+
+        if resp.status_code != 200:
+            detail = resp.json().get("detail", "CV Engine error")
+            raise HTTPException(resp.status_code, detail=detail)
+
+        cv_result = resp.json()
+        wall_mask_b64 = cv_result["wall_mask"]
+        overlay_b64 = cv_result.get("overlay")
+        fg_mask_b64 = cv_result.get("foreground_mask")
+
+        return {
+            "wall_mask": wall_mask_b64,
+            "final_mask": wall_mask_b64,
+            "foreground_mask": fg_mask_b64,
+            "mask_overlay": overlay_b64,
+            "wall_model": "cv-engine (SegFormer+SAM2+GDINO)",
+            "image_width": image.width,
+            "image_height": image.height,
+            "timings": {
+                **cv_result.get("timings", {}),
+                "proxy": round(time.time() - t0, 2),
+            },
+            "stats": cv_result.get("stats"),
+        }
+    except HTTPException:
+        raise
+    except httpx.ConnectError:
+        raise HTTPException(
+            503,
+            detail="CV Engine niedostępny. Uruchom: conda activate cv-engine && cd cv-engine && python main.py"
+        )
+    except Exception as exc:
+        logger.error("smart_mask failed: %s", exc, exc_info=True)
+        raise HTTPException(500, detail=f"Smart mask failed: {exc}")
 
 
 @router.post("/api/detect-mask")

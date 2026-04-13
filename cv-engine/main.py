@@ -14,6 +14,7 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import cv2
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,7 +50,6 @@ async def lifespan(app: FastAPI):
     logger.info("CV Engine starting — loading models...")
     t0 = time.time()
 
-    # Load models lazily on first request, or eagerly via WARMUP=1
     if os.environ.get("WARMUP", "0") == "1":
         try:
             wall_prior.load_model()
@@ -100,8 +100,21 @@ class PointSchema(BaseModel):
     y: float
 
 
-class AnalyzeRequest(BaseModel):
+class BoxSchema(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+class WallMaskRequest(BaseModel):
+    """Smart wall masking: image + selection box → clean wall-only mask."""
     image: str  # base64 encoded
+    box: BoxSchema  # user selection rectangle in image coordinates
+
+
+class AnalyzeRequest(BaseModel):
+    image: str
     polygon: list[PointSchema] | None = None
     foreground_prompt: str | None = None
 
@@ -113,7 +126,7 @@ class WallSegmentRequest(BaseModel):
 
 class ForegroundRequest(BaseModel):
     image: str
-    wall_mask: str | None = None  # base64 encoded mask
+    wall_mask: str | None = None
     prompt: str | None = None
 
 
@@ -150,15 +163,164 @@ def image_to_b64(img: Image.Image, fmt: str = "JPEG") -> str:
 
 
 def polygon_to_mask(polygon: list[PointSchema], w: int, h: int) -> np.ndarray:
-    """Convert polygon points to a binary mask."""
-    import cv2
     pts = np.array([[int(p.x), int(p.y)] for p in polygon], dtype=np.int32)
     mask = np.zeros((h, w), dtype=np.uint8)
     cv2.fillPoly(mask, [pts], 255)
     return mask
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────────
+def render_mask_overlay(image: Image.Image, mask: np.ndarray) -> Image.Image:
+    """Create a semi-transparent overlay showing the mask on the image."""
+    img_np = np.array(image).copy()
+    overlay = img_np.copy()
+    # Red tint for wall area
+    overlay[mask > 127] = (
+        overlay[mask > 127] * 0.5 + np.array([180, 40, 40]) * 0.5
+    ).astype(np.uint8)
+    # Green outline for boundary
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(overlay, contours, -1, (0, 255, 0), 2)
+    return Image.fromarray(overlay)
+
+
+# ── MAIN ENDPOINT: Smart Wall Mask ────────────────────────────────────────────
+
+@app.post("/wall-mask")
+async def wall_mask_endpoint(req: WallMaskRequest):
+    """Smart wall masking: selection box → wall-only mask.
+
+    Pipeline:
+    1. SegFormer wall prior → probability map of wall pixels
+    2. Clip to user selection box
+    3. SAM2 refine → pixel-precise wall boundary
+    4. GroundingDINO + SAM2 → detect & subtract foreground objects
+    5. Morphological cleanup → remove ceiling, floor, stray pixels
+    """
+    t0 = time.time()
+    timings = {}
+    image = decode_image(req.image)
+    w, h = image.size
+
+    # Clamp box to image bounds
+    x1 = max(0, int(req.box.x1))
+    y1 = max(0, int(req.box.y1))
+    x2 = min(w, int(req.box.x2))
+    y2 = min(h, int(req.box.y2))
+
+    if x2 - x1 < 10 or y2 - y1 < 10:
+        raise HTTPException(400, detail="Selection box too small")
+
+    logger.info("Wall mask request: box=[%d,%d,%d,%d] image=%dx%d", x1, y1, x2, y2, w, h)
+
+    # ── Stage 1: Wall prior (SegFormer) ───────────────────────────────────
+    t1 = time.time()
+    wall_prob = wall_prior.predict_wall_mask(image)
+    _warmup_status["wall_prior"] = True
+    timings["wall_prior"] = round(time.time() - t1, 2)
+    logger.info("Stage 1 (wall prior): %.2fs", timings["wall_prior"])
+
+    # Clip wall probability to selection box
+    box_mask = np.zeros((h, w), dtype=np.uint8)
+    box_mask[y1:y2, x1:x2] = 255
+
+    # Wall within box — use lower threshold to capture more wall
+    wall_in_box = (wall_prob > 0.15).astype(np.uint8) * 255
+    wall_in_box = np.minimum(wall_in_box, box_mask)
+
+    # If wall prior found very little inside the box, fall back to full box
+    wall_pixels = wall_in_box.sum() / 255
+    box_pixels = (y2 - y1) * (x2 - x1)
+    if wall_pixels < box_pixels * 0.1:
+        logger.warning("Wall prior found <10%% wall in box, using full box as initial mask")
+        wall_in_box = box_mask.copy()
+
+    # ── Stage 2: SAM2 refinement ──────────────────────────────────────────
+    t2 = time.time()
+    refined = mask_refine.refine_mask(
+        image,
+        wall_in_box,
+        polygon=None,
+    )
+    _warmup_status["sam2"] = True
+    timings["sam2_refine"] = round(time.time() - t2, 2)
+    logger.info("Stage 2 (SAM2 refine): %.2fs", timings["sam2_refine"])
+
+    # Clip refined result back to box (SAM might leak outside)
+    refined = np.minimum(refined, box_mask)
+
+    # ── Stage 3: Foreground occlusion ─────────────────────────────────────
+    t3 = time.time()
+    try:
+        fg_mask = foreground.detect_foreground_mask(
+            image,
+            wall_mask=refined,
+            text_prompt=foreground.DEFAULT_PROMPT,
+        )
+        _warmup_status["grounding_dino"] = True
+        timings["foreground"] = round(time.time() - t3, 2)
+        logger.info("Stage 3 (foreground): %.2fs, %d fg pixels",
+                     timings["foreground"], fg_mask.sum() // 255)
+
+        # Subtract foreground from wall mask
+        if fg_mask.sum() > 0:
+            # Dilate foreground slightly for safety
+            kernel = np.ones((5, 5), np.uint8)
+            fg_dilated = cv2.dilate(fg_mask, kernel, iterations=1)
+            refined = np.clip(
+                refined.astype(np.int16) - fg_dilated.astype(np.int16),
+                0, 255,
+            ).astype(np.uint8)
+    except Exception as e:
+        logger.warning("Foreground detection failed (non-fatal): %s", e)
+        fg_mask = np.zeros((h, w), dtype=np.uint8)
+        timings["foreground"] = -1
+
+    # ── Stage 4: Morphological cleanup ────────────────────────────────────
+    t4 = time.time()
+
+    # Remove small connected components (noise)
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        refined, connectivity=8
+    )
+    min_area = max(100, int(box_pixels * 0.005))  # at least 0.5% of box
+    clean_mask = np.zeros_like(refined)
+    for i in range(1, num_labels):
+        if stats[i, cv2.CC_STAT_AREA] >= min_area:
+            clean_mask[labels == i] = 255
+
+    # Morphological close to fill small holes
+    kernel_close = np.ones((7, 7), np.uint8)
+    clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, kernel_close)
+
+    # Smooth edges slightly
+    clean_mask = cv2.GaussianBlur(clean_mask, (5, 5), 0)
+    clean_mask = (clean_mask > 127).astype(np.uint8) * 255
+
+    timings["cleanup"] = round(time.time() - t4, 2)
+    timings["total"] = round(time.time() - t0, 2)
+
+    logger.info("Wall mask complete: total=%.2fs, mask pixels=%d",
+                timings["total"], clean_mask.sum() // 255)
+
+    # ── Build overlay visualization ───────────────────────────────────────
+    overlay = render_mask_overlay(image, clean_mask)
+
+    return {
+        "wall_mask": mask_to_b64(clean_mask),
+        "wall_prior_raw": mask_to_b64((wall_prob * 255).astype(np.uint8)),
+        "foreground_mask": mask_to_b64(fg_mask),
+        "overlay": image_to_b64(overlay),
+        "timings": timings,
+        "stats": {
+            "wall_pixels": int(clean_mask.sum() // 255),
+            "total_pixels": w * h,
+            "coverage_pct": round(float(clean_mask.sum() / 255) / (w * h) * 100, 1),
+            "box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        },
+    }
+
+
+# ── Other endpoints ───────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
@@ -174,20 +336,16 @@ async def wall_segment(req: WallSegmentRequest):
     t0 = time.time()
     image = decode_image(req.image)
 
-    # Stage 1: Wall prior
     wall_prob = wall_prior.predict_wall_mask(image)
     _warmup_status["wall_prior"] = True
 
-    # Combine with user polygon if provided
     if req.polygon and len(req.polygon) >= 3:
         poly_mask = polygon_to_mask(req.polygon, image.width, image.height)
-        # Intersect: wall prior AND polygon
         wall_binary = (wall_prob > 0.2).astype(np.uint8) * 255
         combined = np.minimum(wall_binary, poly_mask)
     else:
         combined = (wall_prob > 0.3).astype(np.uint8) * 255
 
-    # Stage 2: SAM2 refinement
     polygon_dicts = [{"x": p.x, "y": p.y} for p in req.polygon] if req.polygon else None
     refined = mask_refine.refine_mask(image, combined, polygon_dicts)
     _warmup_status["sam2"] = True
@@ -201,21 +359,19 @@ async def wall_segment(req: WallSegmentRequest):
 
 @app.post("/foreground-detect")
 async def foreground_detect(req: ForegroundRequest):
-    """Stage 3: Foreground occlusion masking."""
     t0 = time.time()
     image = decode_image(req.image)
 
-    wall_mask = None
+    wall_mask_arr = None
     if req.wall_mask:
-        wall_mask = decode_mask(req.wall_mask, image.width, image.height)
+        wall_mask_arr = decode_mask(req.wall_mask, image.width, image.height)
 
     prompt = req.prompt or foreground.DEFAULT_PROMPT
     fg_mask = foreground.detect_foreground_mask(
-        image, wall_mask=wall_mask, text_prompt=prompt
+        image, wall_mask=wall_mask_arr, text_prompt=prompt
     )
     _warmup_status["grounding_dino"] = True
 
-    # Also return detected objects list
     boxes = foreground.detect_foreground_boxes(image, text_prompt=prompt)
 
     return {
@@ -227,14 +383,11 @@ async def foreground_detect(req: ForegroundRequest):
 
 @app.post("/depth-estimate")
 async def depth_estimate(req: DepthRequest):
-    """Stage 4: Depth estimation."""
     t0 = time.time()
     image = decode_image(req.image)
 
     depth_map = depth.estimate_depth(image)
     _warmup_status["depth"] = True
-
-    # Create colormap visualization
     depth_vis = depth.depth_to_colormap(depth_map)
 
     return {
@@ -246,12 +399,10 @@ async def depth_estimate(req: DepthRequest):
 
 @app.post("/analyze")
 async def analyze(req: AnalyzeRequest):
-    """Full pipeline: wall + foreground + depth in one call."""
     t0 = time.time()
     image = decode_image(req.image)
     timings = {}
 
-    # Stage 1+2: Wall segmentation
     t1 = time.time()
     wall_prob = wall_prior.predict_wall_mask(image)
     _warmup_status["wall_prior"] = True
@@ -268,7 +419,6 @@ async def analyze(req: AnalyzeRequest):
     _warmup_status["sam2"] = True
     timings["wall"] = round(time.time() - t1, 2)
 
-    # Stage 3: Foreground detection
     t2 = time.time()
     prompt = req.foreground_prompt or foreground.DEFAULT_PROMPT
     fg_mask = foreground.detect_foreground_mask(
@@ -277,14 +427,12 @@ async def analyze(req: AnalyzeRequest):
     _warmup_status["grounding_dino"] = True
     timings["foreground"] = round(time.time() - t2, 2)
 
-    # Stage 4: Depth
     t3 = time.time()
     depth_map = depth.estimate_depth(image)
     _warmup_status["depth"] = True
     timings["depth"] = round(time.time() - t3, 2)
 
     timings["total"] = round(time.time() - t0, 2)
-
     depth_vis = depth.depth_to_colormap(depth_map)
 
     return {

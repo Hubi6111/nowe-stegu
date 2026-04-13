@@ -1,5 +1,19 @@
 [
   {
+    "id": "20260414-013717-ca8930",
+    "timestamp": "2026-04-14 01:37:17",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.4,
+      "total": 0.42
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-003212-362dd4",
     "timestamp": "2026-04-14 00:32:12",
     "client_ip": "127.0.0.1",

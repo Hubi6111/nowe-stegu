@@ -57,6 +57,7 @@ interface PipelineStage {
 }
 
 const INITIAL_STAGES: PipelineStage[] = [
+  { id: "mask", label: "Inteligentna maska ściany", status: "pending" },
   { id: "decode", label: "Dekodowanie obrazu", status: "pending" },
   { id: "texture", label: "Projekcja tekstury", status: "pending" },
 ];
@@ -538,12 +539,54 @@ export default function Home() {
     setGenProgress("Przygotowywanie obrazu…");
     setPipelineStages(INITIAL_STAGES.map(s => ({ ...s, status: "pending" as const })));
     setDebugOpen(false);
-    setDebugData(null); // ── DEBUG (removable) ──
 
     try {
       const imageBase64 = await prepareImageForUpload(imageSrc);
-      setGenProgress("Łączenie z serwerem…");
       const polygon = rectToPolygon(rectPts);
+
+      // ── Stage 1: Smart wall mask via CV Engine ──
+      setPipelineStages(prev => prev.map(s => s.id === "mask" ? { ...s, status: "running", message: "Analizowanie ściany (SegFormer + SAM2 + GroundingDINO)…" } : s));
+      setGenProgress("Wykrywanie ściany…");
+
+      let confirmedMask: string | null = null;
+      try {
+        const maskRes = await fetch(`${API_BASE}/api/smart-mask`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            image: imageBase64,
+            polygon,
+            canvas_width: stageSize.width,
+            canvas_height: stageSize.height,
+          }),
+        });
+
+        if (maskRes.ok) {
+          const maskData = await maskRes.json();
+          confirmedMask = maskData.final_mask || maskData.wall_mask;
+          const timing = maskData.timings?.total;
+          const model = maskData.wall_model || "cv-engine";
+          setPipelineStages(prev => prev.map(s => s.id === "mask"
+            ? { ...s, status: "done", timing, detail: model }
+            : s
+          ));
+        } else {
+          // Fallback to polygon-only if cv-engine unavailable
+          setPipelineStages(prev => prev.map(s => s.id === "mask"
+            ? { ...s, status: "warning", detail: "Fallback: polygon-only" }
+            : s
+          ));
+        }
+      } catch {
+        // cv-engine not running — fallback gracefully
+        setPipelineStages(prev => prev.map(s => s.id === "mask"
+          ? { ...s, status: "warning", detail: "CV Engine niedostępny — użyto prostej maski" }
+          : s
+        ));
+      }
+
+      // ── Stage 2+3: Render stream (decode + texture) ──
+      setGenProgress("Łączenie z serwerem…");
 
       const res = await fetch(`${API_BASE}/api/render-stream`, {
         method: "POST",
@@ -551,6 +594,7 @@ export default function Home() {
         body: JSON.stringify({
           image: imageBase64,
           polygon,
+          confirmed_mask: confirmedMask,
           product_id: selectedProduct.productId,
           canvas_width: stageSize.width,
           canvas_height: stageSize.height,
