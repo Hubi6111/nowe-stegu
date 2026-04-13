@@ -696,6 +696,7 @@ a different wood tone. Copy the colors pixel-accurately.
 brick dimensions — every element must match IMAGE 3)
   • SPACING: Same spacing between elements — if slats are evenly spaced \
 in IMAGE 3, they must be evenly spaced in the result
+{gap_info}
   • SEAMLESS: No visible seams, joints, or repetition artifacts where \
 tiles meet. One continuous surface.
 
@@ -750,9 +751,22 @@ def generate_photorealistic_render(
 
     meta = product_meta or {}
 
+    # Build gap info from product metadata
+    joint_mm = float(meta.get("jointMm", 10))
+    joint_cm = joint_mm / 10.0
+    if joint_cm >= 1.0:
+        gap_info = (
+            f"  • GAP: Each panel/slat must be separated by exactly "
+            f"{joint_cm:.1f}cm gaps. The dark space between elements is "
+            f"{joint_cm:.1f}cm wide — not wider, not narrower."
+        )
+    else:
+        gap_info = ""
+
     prompt = _RENDER_PROMPT_TEMPLATE.format(
         product_name=str(product_name or "product"),
         material_type=str(material_type),
+        gap_info=gap_info,
     )
 
     # Send 3 images: composite ("bez ai"), original, product texture

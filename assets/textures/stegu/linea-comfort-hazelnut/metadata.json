@@ -6,7 +6,7 @@
   "tileHeightMm": 480,
   "moduleWidthMm": 240,
   "moduleHeightMm": 480,
-  "jointMm": 2,
+  "jointMm": 30,
   "layoutType": "vertical-stack",
   "offsetRatio": 0,
   "textureScaleMultiplier": 1.0,
