@@ -59,7 +59,8 @@ interface PipelineStage {
 const INITIAL_STAGES: PipelineStage[] = [
   { id: "decode", label: "Dekodowanie obrazu", status: "pending" },
   { id: "texture", label: "Projekcja tekstury", status: "pending" },
-  { id: "render", label: "Render AI — analiza + kompozycja", status: "pending" },
+  { id: "analyze", label: "Analiza wymiarów ściany", status: "pending" },
+  { id: "render", label: "Render AI z kalibracją", status: "pending" },
 ];
 
 function StageIcon({ status }: { status: PipelineStage["status"] }) {

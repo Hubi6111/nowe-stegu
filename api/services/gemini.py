@@ -798,6 +798,34 @@ def generate_photorealistic_render(
 
     dimensions_info = "\n".join(dim_lines)
 
+    # Enrich with AI-measured wall dimensions if available
+    if analysis and (analysis.get("wallHeightCm") or analysis.get("wallWidthCm")):
+        measured_lines = ["\nMEASURED WALL DIMENSIONS (from scene analysis):"]
+        wall_h_cm = analysis.get("wallHeightCm")
+        wall_w_cm = analysis.get("wallWidthCm")
+        if wall_h_cm:
+            measured_lines.append(f"  • Wall height: {wall_h_cm}cm")
+            wh = float(wall_h_cm)
+            if "lamel" in material_type.lower() or "panel" in material_type.lower() or layout == "vertical-stack":
+                fit_h = int(wh / module_h_cm) if module_h_cm > 0 else 0
+                measured_lines.append(f"  • ~{fit_h} panels fit vertically in this wall")
+            else:
+                step_cm = module_h_cm + joint_cm
+                fit_h = int(wh / step_cm) if step_cm > 0 else 0
+                measured_lines.append(f"  • ~{fit_h} bricks fit vertically in this wall")
+        if wall_w_cm:
+            measured_lines.append(f"  • Wall width: {wall_w_cm}cm")
+            ww = float(wall_w_cm)
+            if "lamel" in material_type.lower() or "panel" in material_type.lower() or layout == "vertical-stack":
+                step_w = module_w_cm + joint_cm
+                fit_w = int(ww / step_w) if step_w > 0 else 0
+                measured_lines.append(f"  • ~{fit_w} slats fit horizontally in this wall")
+            else:
+                step_w = module_w_cm + joint_cm
+                fit_w = int(ww / step_w) if step_w > 0 else 0
+                measured_lines.append(f"  • ~{fit_w} bricks fit horizontally in this wall")
+        dimensions_info += "\n".join(measured_lines)
+
     prompt = _RENDER_PROMPT_TEMPLATE.format(
         product_name=str(product_name or "product"),
         material_type=str(material_type),

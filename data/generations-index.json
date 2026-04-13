@@ -1,5 +1,35 @@
 [
   {
+    "id": "20260413-225023-e14744",
+    "timestamp": "2026-04-13 22:50:23",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.3,
+      "render": 17.53,
+      "total": 17.99
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-224745-68024e",
+    "timestamp": "2026-04-13 22:47:45",
+    "client_ip": "127.0.0.1",
+    "product_id": "monsanto-1",
+    "product_name": "Monsanto 1",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.02,
+      "texture": 0.34,
+      "render": 18.84,
+      "total": 19.34
+    },
+    "has_image": true
+  },
+  {
     "id": "20260413-223852-f19f73",
     "timestamp": "2026-04-13 22:38:52",
     "client_ip": "127.0.0.1",

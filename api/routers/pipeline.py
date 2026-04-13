@@ -536,10 +536,32 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             "materialType", meta.get("layoutType", "decorative stone/brick")
         )
 
-        # ── Stage 3: AI Render (3 images: composite, original, texture) ───
+        # ── Stage 3: Quick scene analysis (dimensions only) ───────────────
+        t_analysis = time.time()
+        yield _sse({"stage": "analyze", "status": "running",
+                     "message": "Analiza wymiarów ściany (Gemini)…"})
+        analysis: dict = {}
+        mask_overlay = render_mask_overlay(
+            image, final_mask, alpha=0.55, max_long_side=2048
+        )
+        try:
+            analysis = analyze_wall_scene(image, composite, mask_overlay)
+            td = round(time.time() - t_analysis, 2)
+            timings["analyze"] = td
+            wh = analysis.get("wallHeightCm", "?")
+            ww = analysis.get("wallWidthCm", "?")
+            yield _sse({"stage": "analyze", "status": "done", "timing": td,
+                         "detail": f"Ściana: {wh}×{ww} cm"})
+        except Exception as exc:
+            td = round(time.time() - t_analysis, 2)
+            timings["analyze"] = td
+            yield _sse({"stage": "analyze", "status": "warning",
+                         "error": str(exc), "timing": td})
+
+        # ── Stage 4: AI Render (with dimension data from analysis) ────────
         t2 = time.time()
         yield _sse({"stage": "render", "status": "running",
-                     "message": "Renderowanie AI — analiza sceny, kompozycja, oświetlenie (Gemini)…"})
+                     "message": "Renderowanie AI z kalibracją wymiarów (Gemini)…"})
         raw_rendered = None
         try:
             raw_rendered = generate_photorealistic_render(
@@ -547,6 +569,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 composite=composite,
                 product_name=product_name,
                 product_texture=texture,
+                analysis=analysis,
                 material_type=material_type,
                 product_meta=meta,
             )
