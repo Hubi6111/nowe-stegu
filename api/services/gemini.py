@@ -676,49 +676,41 @@ _RENDER_PROMPT_TEMPLATE = """\
 You receive 3 images:
 
 IMAGE 1 — "BEZ AI": The original room with "{product_name}" ({material_type}) \
-texture overlaid on the wall. Shows exact texture position, size, and tiling.
+texture overlaid on the wall.
 
 IMAGE 2 — ORIGINAL: The room without any texture.
 
-IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material. \
-Shows the exact shape, color, spacing, and proportions of the elements. \
-The COLORS in this image are the GROUND TRUTH — reproduce them exactly.
+IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material \
+showing the real colors and surface detail.
 
-CREATE: The ORIGINAL photo (IMAGE 2) with the texture placed on the wall \
-exactly like in IMAGE 1 ("Bez AI") — same position, same size, same tiling.
+YOUR JOB — this is a COPY operation, not a creative task:
 
-TEXTURE FIDELITY — match IMAGE 3 exactly:
-  • COLORS: The texture colors must be IDENTICAL to IMAGE 3 — same hue, \
-same saturation, same brightness. If the slats are light oak in IMAGE 3, \
-they must be light oak in the result — not darker, not lighter, not \
-a different wood tone. Copy the colors pixel-accurately.
-  • SHAPE: Same element shape and proportions (panel width, slat spacing, \
-brick dimensions — every element must match IMAGE 3)
-  • SPACING: Same spacing between elements — if slats are evenly spaced \
-in IMAGE 3, they must be evenly spaced in the result
+1. Start with IMAGE 1 ("Bez AI") — this is your base image
+2. The texture in IMAGE 1 is ALREADY CORRECT — copy it EXACTLY as-is. \
+Every slat, every brick, every panel, every gap must be in the EXACT \
+same position, same size, same spacing, same pattern as in IMAGE 1. \
+Do NOT re-draw or re-interpret the texture in any way.
+3. The colors of the texture should match IMAGE 3 (the swatch photo)
+4. From IMAGE 2 (original), copy back any objects that are IN FRONT of \
+the wall — furniture, TV, plants, lamps, frames, switches, people. \
+These objects must appear ON TOP of the texture.
+5. Where the texture goes beyond the wall (onto ceiling, floor, other \
+walls, baseboards, door frames) — show IMAGE 2 (original) instead.
+6. Apply subtle lighting from IMAGE 2 — very slight brightness \
+adjustment only, do NOT change the texture colors.
 {gap_info}
-  • SEAMLESS: No visible seams, joints, or repetition artifacts where \
-tiles meet. One continuous surface.
 
-LIGHTING — match IMAGE 2 naturally:
-  • Apply the same light direction, intensity, and color temperature \
-as in the ORIGINAL photo
-  • Add subtle shadows and gradients matching the room's ambient light
-  • Where furniture is close to the wall, add natural contact shadows
-  • The texture should look like it's physically part of the room, \
-lit by the same light sources
+CRITICAL — the texture pattern must be 100% IDENTICAL to IMAGE 1:
+  • Same number of elements (slats, bricks, panels)
+  • Same positions and spacing
+  • Same scale and proportions
+  • If IMAGE 1 shows 10 vertical slats, your output shows 10 vertical \
+slats in the EXACT same positions
 
-The texture must NOT cover anything that is not the wall surface:
-  • Furniture, TV, shelves, plants, lamps, frames, switches, cables, \
-people — anything in front of the wall must be fully visible
-  • Ceiling, floor, baseboards, door frames, window frames, other walls \
-— must look exactly like IMAGE 2
-
-Only the wall surface gets the texture. Everything else = IMAGE 2 exactly.
-
-⛔ Do NOT change texture size/position from IMAGE 1
+⛔ Do NOT re-draw, re-generate, or re-imagine the texture
+⛔ Do NOT change the number, spacing, or positions of elements
 ⛔ Do NOT crop, zoom, or resize
-⛔ Do NOT re-tile or re-draw the texture pattern differently
+⛔ COPY the texture from IMAGE 1, that is ALL
 
 Output ONLY the image.
 """
