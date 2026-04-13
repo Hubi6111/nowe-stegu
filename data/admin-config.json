@@ -1,6 +1,6 @@
 {
   "admin_password_hash": "75431c465905c8646ca4ae4e4aab8c5c8c3f0e20f2db4122ee4b8728a61f2142",
-  "daily_generation_limit": 30,
+  "daily_generation_limit": 300,
   "watermark_enabled": true,
   "watermark_opacity": 0.44
 }

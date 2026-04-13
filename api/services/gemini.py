@@ -681,19 +681,23 @@ texture overlaid on the wall. Shows exact texture position, size, and tiling.
 IMAGE 2 — ORIGINAL: The room without any texture.
 
 IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material. \
-Shows the exact shape, color, spacing, and proportions of the elements.
+Shows the exact shape, color, spacing, and proportions of the elements. \
+The COLORS in this image are the GROUND TRUTH — reproduce them exactly.
 
 CREATE: The ORIGINAL photo (IMAGE 2) with the texture placed on the wall \
 exactly like in IMAGE 1 ("Bez AI") — same position, same size, same tiling.
 
 TEXTURE FIDELITY — match IMAGE 3 exactly:
-  • Same colors and material look
-  • Same element shape and proportions (e.g. panel width, slat spacing, \
+  • COLORS: The texture colors must be IDENTICAL to IMAGE 3 — same hue, \
+same saturation, same brightness. If the slats are light oak in IMAGE 3, \
+they must be light oak in the result — not darker, not lighter, not \
+a different wood tone. Copy the colors pixel-accurately.
+  • SHAPE: Same element shape and proportions (panel width, slat spacing, \
 brick dimensions — every element must match IMAGE 3)
-  • Same spacing between elements — if slats are evenly spaced in IMAGE 3, \
-they must be evenly spaced in the result
-  • The texture must be SEAMLESS — no visible seams, joints, or repetition \
-artifacts where tiles meet. It should look like one continuous surface.
+  • SPACING: Same spacing between elements — if slats are evenly spaced \
+in IMAGE 3, they must be evenly spaced in the result
+  • SEAMLESS: No visible seams, joints, or repetition artifacts where \
+tiles meet. One continuous surface.
 
 LIGHTING — match IMAGE 2 naturally:
   • Apply the same light direction, intensity, and color temperature \
@@ -770,7 +774,7 @@ def generate_photorealistic_render(
             client, model=model_name, contents=parts,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],
-                temperature=0.2,
+                temperature=0.05,
             ),
         )
     except Exception as exc:
