@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from services.gemini import (
     analyze_wall_scene,
     generate_photorealistic_render,
+    build_render_prompt,
     verify_and_correct_render,
     image_model_name,
     refine_image,
@@ -536,45 +537,54 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             "materialType", meta.get("layoutType", "decorative stone/brick")
         )
 
-        # ── Stage 3: Quick scene analysis (dimensions only) ───────────────
-        t_analysis = time.time()
-        yield _sse({"stage": "analyze", "status": "running",
-                     "message": "Analiza wymiarów ściany (Gemini)…"})
-        analysis: dict = {}
-        mask_overlay = render_mask_overlay(
-            image, final_mask, alpha=0.55, max_long_side=2048
-        )
+        # ── DEBUG: Send prompt + images to frontend ── (removable section)
         try:
-            analysis = analyze_wall_scene(image, composite, mask_overlay)
-            td = round(time.time() - t_analysis, 2)
-            timings["analyze"] = td
-            wh = analysis.get("wallHeightCm", "?")
-            ww = analysis.get("wallWidthCm", "?")
-            yield _sse({"stage": "analyze", "status": "done", "timing": td,
-                         "detail": f"Ściana: {wh}×{ww} cm"})
-        except Exception as exc:
-            td = round(time.time() - t_analysis, 2)
-            timings["analyze"] = td
-            yield _sse({"stage": "analyze", "status": "warning",
-                         "error": str(exc), "timing": td})
+            debug_prompt = build_render_prompt(product_name, material_type, meta)
+            # Build small thumbnails for debug display
+            def _thumb_b64(img: Image.Image, max_side: int = 400) -> str:
+                w, h = img.size
+                ratio = min(max_side / w, max_side / h)
+                thumb = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+                buf = io.BytesIO()
+                thumb.save(buf, format="JPEG", quality=70)
+                return base64.b64encode(buf.getvalue()).decode()
 
-        # ── Stage 4: AI Render (with dimension data from analysis) ────────
+            debug_images = {
+                "composite_bez_ai": _thumb_b64(composite),
+                "original": _thumb_b64(image),
+            }
+            if texture:
+                debug_images["texture_swatch"] = _thumb_b64(texture)
+
+            yield _sse({
+                "stage": "debug",
+                "prompt": debug_prompt,
+                "images": debug_images,
+                "model": image_model_name(),
+                "temperature": 0.05,
+                "product_meta": {
+                    k: meta.get(k)
+                    for k in ["name", "materialType", "layoutType",
+                              "moduleHeightMm", "moduleWidthMm", "jointMm",
+                              "textureScaleMultiplier"]
+                    if meta.get(k) is not None
+                },
+            })
+        except Exception:
+            pass  # debug is non-critical
+        # ── END DEBUG SECTION ──
+
+        # ── Stage 3: AI Render (3 images: composite, original, texture) ───
         t2 = time.time()
         yield _sse({"stage": "render", "status": "running",
-                     "message": "Renderowanie AI z kalibracją wymiarów (Gemini)…"})
+                     "message": "Renderowanie AI — analiza sceny, kompozycja, oświetlenie (Gemini)…"})
         raw_rendered = None
-        # === DEBUG SECTION START ===
-        render_debug_info: dict = {}
-        # === DEBUG SECTION END ===
         try:
-            # === DEBUG SECTION START ===
-            raw_rendered, render_debug_info = generate_photorealistic_render(
-            # === DEBUG SECTION END ===
+            raw_rendered = generate_photorealistic_render(
                 original=image,
                 composite=composite,
                 product_name=product_name,
                 product_texture=texture,
-                analysis=analysis,
                 material_type=material_type,
                 product_meta=meta,
             )
@@ -591,10 +601,6 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             timings["render"] = td
             yield _sse({"stage": "render", "status": "error",
                          "error": str(exc), "timing": td})
-
-        # === DEBUG SECTION START ===
-        yield _sse({"stage": "debug", "status": "info", "debug": render_debug_info})
-        # === DEBUG SECTION END ===
 
         # Build final output
         if raw_rendered:

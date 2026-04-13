@@ -1,5 +1,21 @@
 [
   {
+    "id": "20260413-232032-12ecce",
+    "timestamp": "2026-04-13 23:20:32",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.02,
+      "texture": 0.32,
+      "analyze": 38.51,
+      "render": 20.59,
+      "total": 59.6
+    },
+    "has_image": true
+  },
+  {
     "id": "20260413-231235-aa4717",
     "timestamp": "2026-04-13 23:12:35",
     "client_ip": "127.0.0.1",

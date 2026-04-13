@@ -734,6 +734,59 @@ Output ONLY the image.
 """
 
 
+# ── DEBUG: Public prompt builder (used by pipeline debug panel) ───────────
+def build_render_prompt(
+    product_name: str,
+    material_type: str,
+    meta: dict,
+) -> str:
+    """Build the full render prompt from product metadata.
+
+    Public so the pipeline can access it for debug display.
+    """
+    joint_mm = float(meta.get("jointMm", 10))
+    joint_cm = joint_mm / 10.0
+    if joint_cm >= 1.0:
+        gap_info = (
+            f"  • GAP: Each panel/slat must be separated by exactly "
+            f"{joint_cm:.1f}cm gaps. The dark space between elements is "
+            f"{joint_cm:.1f}cm wide — not wider, not narrower."
+        )
+    else:
+        gap_info = ""
+
+    module_h_mm = float(meta.get("moduleHeightMm", 65))
+    module_w_mm = float(meta.get("moduleWidthMm", 250))
+    module_h_cm = module_h_mm / 10.0
+    module_w_cm = module_w_mm / 10.0
+    layout = meta.get("layoutType", "running-bond")
+
+    dim_lines = [f"The product \"{product_name}\" has these real dimensions:"]
+    if "lamel" in material_type.lower() or "panel" in material_type.lower() or "slat" in layout.lower() or layout == "vertical-stack":
+        dim_lines.append(f"  • Each slat/panel is {module_w_cm:.1f}cm wide and {module_h_cm:.1f}cm tall")
+        if joint_cm >= 1.0:
+            dim_lines.append(f"  • Gap between slats: {joint_cm:.1f}cm")
+        bricks_in_door = int(200 / module_w_cm) if module_w_cm > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_door} slats would fit across a 200cm door width")
+    else:
+        dim_lines.append(f"  • Each brick/module is {module_w_cm:.1f}cm wide × {module_h_cm:.1f}cm tall")
+        if joint_cm > 0:
+            dim_lines.append(f"  • Joint/mortar gap: {joint_cm:.1f}cm")
+        b_door = int(200 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
+        dim_lines.append(f"  • ~{b_door} bricks should fit vertically in a 200cm door height")
+        b_room = int(270 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
+        dim_lines.append(f"  • ~{b_room} bricks should fit vertically in a 270cm room height")
+
+    dimensions_info = "\n".join(dim_lines)
+
+    return _RENDER_PROMPT_TEMPLATE.format(
+        product_name=str(product_name or "product"),
+        material_type=str(material_type),
+        gap_info=gap_info,
+        dimensions_info=dimensions_info,
+    )
+
+
 def generate_photorealistic_render(
     original: Image.Image,
     composite: Image.Image,
@@ -760,78 +813,7 @@ def generate_photorealistic_render(
     client = _gemini_client()
 
     meta = product_meta or {}
-
-    # Build gap info from product metadata
-    joint_mm = float(meta.get("jointMm", 10))
-    joint_cm = joint_mm / 10.0
-    if joint_cm >= 1.0:
-        gap_info = (
-            f"  • GAP: Each panel/slat must be separated by exactly "
-            f"{joint_cm:.1f}cm gaps. The dark space between elements is "
-            f"{joint_cm:.1f}cm wide — not wider, not narrower."
-        )
-    else:
-        gap_info = ""
-
-    # Build dimension info from product metadata
-    module_h_mm = float(meta.get("moduleHeightMm", 65))
-    module_w_mm = float(meta.get("moduleWidthMm", 250))
-    module_h_cm = module_h_mm / 10.0
-    module_w_cm = module_w_mm / 10.0
-    layout = meta.get("layoutType", "running-bond")
-
-    dim_lines = [f"The product \"{product_name}\" has these real dimensions:"]
-    if "lamel" in material_type.lower() or "panel" in material_type.lower() or "slat" in layout.lower() or layout == "vertical-stack":
-        dim_lines.append(f"  • Each slat/panel is {module_w_cm:.1f}cm wide and {module_h_cm:.1f}cm tall")
-        if joint_cm >= 1.0:
-            dim_lines.append(f"  • Gap between slats: {joint_cm:.1f}cm")
-        bricks_in_door = int(200 / module_w_cm) if module_w_cm > 0 else 0
-        dim_lines.append(f"  • ~{bricks_in_door} slats would fit across a 200cm door width")
-    else:
-        dim_lines.append(f"  • Each brick/module is {module_w_cm:.1f}cm wide × {module_h_cm:.1f}cm tall")
-        if joint_cm > 0:
-            dim_lines.append(f"  • Joint/mortar gap: {joint_cm:.1f}cm")
-        bricks_in_door = int(200 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
-        dim_lines.append(f"  • ~{bricks_in_door} bricks should fit vertically in a 200cm door height")
-        bricks_in_room = int(270 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
-        dim_lines.append(f"  • ~{bricks_in_room} bricks should fit vertically in a 270cm room height")
-
-    dimensions_info = "\n".join(dim_lines)
-
-    # Enrich with AI-measured wall dimensions if available
-    if analysis and (analysis.get("wallHeightCm") or analysis.get("wallWidthCm")):
-        measured_lines = ["\nMEASURED WALL DIMENSIONS (from scene analysis):"]
-        wall_h_cm = analysis.get("wallHeightCm")
-        wall_w_cm = analysis.get("wallWidthCm")
-        if wall_h_cm:
-            measured_lines.append(f"  • Wall height: {wall_h_cm}cm")
-            wh = float(wall_h_cm)
-            if "lamel" in material_type.lower() or "panel" in material_type.lower() or layout == "vertical-stack":
-                fit_h = int(wh / module_h_cm) if module_h_cm > 0 else 0
-                measured_lines.append(f"  • ~{fit_h} panels fit vertically in this wall")
-            else:
-                step_cm = module_h_cm + joint_cm
-                fit_h = int(wh / step_cm) if step_cm > 0 else 0
-                measured_lines.append(f"  • ~{fit_h} bricks fit vertically in this wall")
-        if wall_w_cm:
-            measured_lines.append(f"  • Wall width: {wall_w_cm}cm")
-            ww = float(wall_w_cm)
-            if "lamel" in material_type.lower() or "panel" in material_type.lower() or layout == "vertical-stack":
-                step_w = module_w_cm + joint_cm
-                fit_w = int(ww / step_w) if step_w > 0 else 0
-                measured_lines.append(f"  • ~{fit_w} slats fit horizontally in this wall")
-            else:
-                step_w = module_w_cm + joint_cm
-                fit_w = int(ww / step_w) if step_w > 0 else 0
-                measured_lines.append(f"  • ~{fit_w} bricks fit horizontally in this wall")
-        dimensions_info += "\n".join(measured_lines)
-
-    prompt = _RENDER_PROMPT_TEMPLATE.format(
-        product_name=str(product_name or "product"),
-        material_type=str(material_type),
-        gap_info=gap_info,
-        dimensions_info=dimensions_info,
-    )
+    prompt = build_render_prompt(product_name, material_type, meta)
 
     # Send 3 images: composite ("bez ai"), original, product texture
     parts: list = [
@@ -843,37 +825,6 @@ def generate_photorealistic_render(
         parts.append(
             types.Part.from_bytes(data=_pil_to_bytes(product_texture), mime_type="image/jpeg")
         )
-
-    # === DEBUG SECTION START ===
-    def _thumb_b64(img: Image.Image, max_side: int = 400) -> str:
-        """Create small thumbnail base64 for debug display."""
-        thumb = img.copy()
-        thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
-        buf = io.BytesIO()
-        thumb.save(buf, format="JPEG", quality=70)
-        return base64.b64encode(buf.getvalue()).decode()
-
-    debug_info: dict = {
-        "prompt": prompt,
-        "model": model_name,
-        "temperature": 0.05,
-        "images_sent": [
-            {"label": "IMAGE 1 — Bez AI (composite)", "b64": _thumb_b64(composite)},
-            {"label": "IMAGE 2 — Original", "b64": _thumb_b64(original)},
-        ],
-        "analysis": analysis if analysis else None,
-        "product_meta_used": {
-            "moduleHeightMm": module_h_mm,
-            "moduleWidthMm": module_w_mm,
-            "jointMm": joint_mm,
-            "layoutType": layout,
-        },
-    }
-    if product_texture:
-        debug_info["images_sent"].append(
-            {"label": "IMAGE 3 — Texture swatch", "b64": _thumb_b64(product_texture)}
-        )
-    # === DEBUG SECTION END ===
 
     img_count = len(parts) - 1  # subtract text part
     logger.info("Gemini photorealistic render — model: %s, images: %d", model_name, img_count)
@@ -892,31 +843,19 @@ def generate_photorealistic_render(
             response = _retry_generate(client, model=model_name, contents=parts)
         except Exception as exc2:
             logger.error("Gemini render failed after retries: %s", exc2)
-            # === DEBUG SECTION START ===
-            debug_info["error"] = str(exc2)
-            return None, debug_info
-            # === DEBUG SECTION END ===
+            return None
 
     if response is None:
-        # === DEBUG SECTION START ===
-        return None, debug_info
-        # === DEBUG SECTION END ===
+        return None
 
     img = _extract_first_image_from_response(response)
     if img is not None:
-        # === DEBUG SECTION START ===
-        return img, debug_info
-        # === DEBUG SECTION END ===
+        return img
 
     tx = _response_text(response)
     if tx:
         logger.warning("Gemini returned text instead of image: %s", tx[:400])
-        # === DEBUG SECTION START ===
-        debug_info["gemini_text_response"] = tx[:1000]
-        # === DEBUG SECTION END ===
-    # === DEBUG SECTION START ===
-    return None, debug_info
-    # === DEBUG SECTION END ===
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
