@@ -679,6 +679,9 @@ IMAGE 1 — ORIGINAL: The unmodified room photograph.
 IMAGE 2 — COMPOSITE: The same photo with "{product_name}" ({material_type}) \
 texture already precisely mapped onto the wall. This texture is FINAL.
 IMAGE 3 — MASK: Shows the wall area with an ORANGE overlay.
+IMAGE 4 — PRODUCT TEXTURE: A close-up tile/swatch of the selected product. \
+Use this as COLOR and DETAIL reference — the wall texture in the COMPOSITE \
+must look exactly like this material. Preserve its colors, grain, and surface.
 
 CRITICAL: Your output must be 95% identical to IMAGE 2 (the COMPOSITE). \
 You are making ONLY these minimal corrections:
@@ -697,12 +700,13 @@ ONLY the flat wall surface.
 
 3. SUBTLE LIGHTING — Very slightly adjust the texture brightness to match \
 the ORIGINAL's lighting direction. This should be barely noticeable — \
-do NOT dramatically change the texture colors or brightness.
+do NOT dramatically change the texture colors or brightness. The texture \
+colors must still match IMAGE 4 (PRODUCT TEXTURE) closely.
 
 ABSOLUTE RULES:
 ⛔ Do NOT re-draw, re-tile, re-generate, or re-imagine the texture
 ⛔ Do NOT change the texture scale, pattern, count, or spacing
-⛔ Do NOT change texture colors — preserve them from the COMPOSITE
+⛔ Do NOT change texture colors — they must match IMAGE 4 (PRODUCT TEXTURE)
 ⛔ Do NOT zoom, crop, pan, or change the resolution
 ⛔ Keep everything outside the wall IDENTICAL to the ORIGINAL
 ⛔ Keep the wall texture IDENTICAL to the COMPOSITE except for the \
@@ -804,14 +808,16 @@ def generate_photorealistic_render(
 ) -> Image.Image | None:
     """Stage 2: Generate photorealistic render.
 
-    Sends 3 images to Gemini:
+    Sends 4 images to Gemini:
       1. ORIGINAL photograph (ground truth for lighting, objects)
       2. COMPOSITE with texture already mapped (from deterministic projection)
       3. MASK OVERLAY showing wall area
+      4. PRODUCT TEXTURE tile (color/detail reference for the selected product)
 
     The AI's job: integrate the composite realistically — mask foreground
     objects, match lighting, fix wall boundaries. It does NOT re-generate
     the texture; it only makes the existing composite look photorealistic.
+    The product texture tile ensures colors match the user's selection.
     """
     from google.genai import types
 
@@ -828,15 +834,20 @@ def generate_photorealistic_render(
         material_type=str(material_type),
     )
 
-    # Send 3 images: original, composite, mask overlay
+    # Send 4 images: original, composite, mask overlay, product texture
     parts: list = [
         types.Part.from_text(text=prompt),
         types.Part.from_bytes(data=_pil_to_bytes(original), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(composite), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(mask_overlay), mime_type="image/jpeg"),
     ]
+    if product_texture:
+        parts.append(
+            types.Part.from_bytes(data=_pil_to_bytes(product_texture), mime_type="image/jpeg")
+        )
 
-    logger.info("Gemini photorealistic render — model: %s, images: 3", model_name)
+    img_count = len(parts) - 1  # subtract text part
+    logger.info("Gemini photorealistic render — model: %s, images: %d", model_name, img_count)
     response = None
     try:
         response = _retry_generate(
