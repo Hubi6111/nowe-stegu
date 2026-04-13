@@ -780,32 +780,21 @@ def generate_photorealistic_render(
     module_w_cm = module_w_mm / 10.0
     layout = meta.get("layoutType", "running-bond")
 
-    dim_lines = [f"PRODUCT \"{product_name}\" — exact real-world dimensions:"]
-    is_panel = ("lamel" in material_type.lower() or "panel" in material_type.lower()
-                or "slat" in layout.lower() or layout == "vertical-stack")
-
-    if is_panel:
-        dim_lines.append(f"  • Each slat/panel thickness: {module_w_cm:.1f}cm")
-        dim_lines.append(f"  • Each slat/panel height: {module_h_cm:.1f}cm")
-        dim_lines.append(f"  • Gap between slats: {joint_cm:.1f}cm")
-        step_w = module_w_cm + joint_cm  # one slat + one gap
-        per_meter = int(100 / step_w) if step_w > 0 else 0
-        dim_lines.append(f"  • One slat + gap = {step_w:.1f}cm → ~{per_meter} slats per 1 meter")
-        in_door_w = int(90 / step_w) if step_w > 0 else 0
-        dim_lines.append(f"  • In a standard 90cm-wide door: ~{in_door_w} slats visible")
-        in_wall_270 = int(270 / step_w) if step_w > 0 else 0
-        dim_lines.append(f"  • On a 270cm-wide wall: ~{in_wall_270} slats")
+    dim_lines = [f"The product \"{product_name}\" has these real dimensions:"]
+    if "lamel" in material_type.lower() or "panel" in material_type.lower() or "slat" in layout.lower() or layout == "vertical-stack":
+        dim_lines.append(f"  • Each slat/panel is {module_w_cm:.1f}cm wide and {module_h_cm:.1f}cm tall")
+        if joint_cm >= 1.0:
+            dim_lines.append(f"  • Gap between slats: {joint_cm:.1f}cm")
+        bricks_in_door = int(200 / module_w_cm) if module_w_cm > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_door} slats would fit across a 200cm door width")
     else:
-        dim_lines.append(f"  • Each brick height: {module_h_cm:.1f}cm")
-        dim_lines.append(f"  • Each brick width: {module_w_cm:.1f}cm")
-        dim_lines.append(f"  • Mortar joint (seam): {joint_cm:.1f}cm")
-        step_h = module_h_cm + joint_cm  # one brick + one seam
-        per_meter_v = int(100 / step_h) if step_h > 0 else 0
-        dim_lines.append(f"  • One brick + seam = {step_h:.1f}cm → ~{per_meter_v} bricks per 1m vertically")
-        in_door_h = int(200 / step_h) if step_h > 0 else 0
-        dim_lines.append(f"  • Standard door (200cm): ~{in_door_h} bricks tall")
-        in_room_h = int(270 / step_h) if step_h > 0 else 0
-        dim_lines.append(f"  • Standard room (270cm): ~{in_room_h} bricks tall")
+        dim_lines.append(f"  • Each brick/module is {module_w_cm:.1f}cm wide × {module_h_cm:.1f}cm tall")
+        if joint_cm > 0:
+            dim_lines.append(f"  • Joint/mortar gap: {joint_cm:.1f}cm")
+        bricks_in_door = int(200 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_door} bricks should fit vertically in a 200cm door height")
+        bricks_in_room = int(270 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_room} bricks should fit vertically in a 270cm room height")
 
     dimensions_info = "\n".join(dim_lines)
 
@@ -855,6 +844,37 @@ def generate_photorealistic_render(
             types.Part.from_bytes(data=_pil_to_bytes(product_texture), mime_type="image/jpeg")
         )
 
+    # === DEBUG SECTION START ===
+    def _thumb_b64(img: Image.Image, max_side: int = 400) -> str:
+        """Create small thumbnail base64 for debug display."""
+        thumb = img.copy()
+        thumb.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+        buf = io.BytesIO()
+        thumb.save(buf, format="JPEG", quality=70)
+        return base64.b64encode(buf.getvalue()).decode()
+
+    debug_info: dict = {
+        "prompt": prompt,
+        "model": model_name,
+        "temperature": 0.05,
+        "images_sent": [
+            {"label": "IMAGE 1 — Bez AI (composite)", "b64": _thumb_b64(composite)},
+            {"label": "IMAGE 2 — Original", "b64": _thumb_b64(original)},
+        ],
+        "analysis": analysis if analysis else None,
+        "product_meta_used": {
+            "moduleHeightMm": module_h_mm,
+            "moduleWidthMm": module_w_mm,
+            "jointMm": joint_mm,
+            "layoutType": layout,
+        },
+    }
+    if product_texture:
+        debug_info["images_sent"].append(
+            {"label": "IMAGE 3 — Texture swatch", "b64": _thumb_b64(product_texture)}
+        )
+    # === DEBUG SECTION END ===
+
     img_count = len(parts) - 1  # subtract text part
     logger.info("Gemini photorealistic render — model: %s, images: %d", model_name, img_count)
     response = None
@@ -872,19 +892,31 @@ def generate_photorealistic_render(
             response = _retry_generate(client, model=model_name, contents=parts)
         except Exception as exc2:
             logger.error("Gemini render failed after retries: %s", exc2)
-            return None
+            # === DEBUG SECTION START ===
+            debug_info["error"] = str(exc2)
+            return None, debug_info
+            # === DEBUG SECTION END ===
 
     if response is None:
-        return None
+        # === DEBUG SECTION START ===
+        return None, debug_info
+        # === DEBUG SECTION END ===
 
     img = _extract_first_image_from_response(response)
     if img is not None:
-        return img
+        # === DEBUG SECTION START ===
+        return img, debug_info
+        # === DEBUG SECTION END ===
 
     tx = _response_text(response)
     if tx:
         logger.warning("Gemini returned text instead of image: %s", tx[:400])
-    return None
+        # === DEBUG SECTION START ===
+        debug_info["gemini_text_response"] = tx[:1000]
+        # === DEBUG SECTION END ===
+    # === DEBUG SECTION START ===
+    return None, debug_info
+    # === DEBUG SECTION END ===
 
 
 # ══════════════════════════════════════════════════════════════════════════════

@@ -440,6 +440,9 @@ export default function Home() {
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(INITIAL_STAGES);
   const [debugOpen, setDebugOpen] = useState(false);
+  // === DEBUG SECTION START ===
+  const [debugData, setDebugData] = useState<Record<string, unknown> | null>(null);
+  // === DEBUG SECTION END ===
 
   const fetchRemaining = useCallback(() => {
     fetch(`${API_BASE}/api/remaining-generations`)
@@ -611,6 +614,13 @@ export default function Home() {
 
           // Handle mask_refine (not in the main list)
           if (stageId === "mask_refine") continue;
+
+          // === DEBUG SECTION START ===
+          if (stageId === "debug" && evt.debug) {
+            setDebugData(evt.debug as Record<string, unknown>);
+            continue;
+          }
+          // === DEBUG SECTION END ===
 
           // Save analysis data if present
           if (evt.analysis) {
@@ -930,6 +940,58 @@ export default function Home() {
                         {debugOpen && (
                           <div className="border-t border-stone-100 py-2">
                             <PipelineStatusPanel stages={pipelineStages} />
+                            {/* === DEBUG SECTION START === */}
+                            {debugData && (
+                              <div className="mt-3 mx-3 border border-amber-200 rounded-lg bg-amber-50/50 overflow-hidden">
+                                <div className="px-3 py-2 bg-amber-100/50 text-xs font-bold text-amber-800">🔍 Debug: Gemini Render Details</div>
+                                
+                                {/* Images sent */}
+                                {(debugData.images_sent as Array<{label: string; b64: string}>)?.length > 0 && (
+                                  <div className="px-3 py-2 border-t border-amber-200">
+                                    <div className="text-[10px] font-semibold text-amber-700 mb-2">Obrazy wysłane do Gemini:</div>
+                                    <div className="flex gap-2 flex-wrap">
+                                      {(debugData.images_sent as Array<{label: string; b64: string}>).map((img, i) => (
+                                        <div key={i} className="flex flex-col items-center">
+                                          <img
+                                            src={`data:image/jpeg;base64,${img.b64}`}
+                                            alt={img.label}
+                                            className="w-32 h-24 object-cover rounded border border-amber-300"
+                                          />
+                                          <span className="text-[9px] text-amber-700 mt-1 text-center max-w-[130px]">{img.label}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Model & Temperature */}
+                                <div className="px-3 py-2 border-t border-amber-200 text-[10px] text-amber-800 space-y-1">
+                                  <div><span className="font-bold">Model:</span> {debugData.model as string}</div>
+                                  <div><span className="font-bold">Temperature:</span> {debugData.temperature as number}</div>
+                                  {debugData.analysis && (
+                                    <div><span className="font-bold">Analiza ściany:</span> {JSON.stringify(debugData.analysis)}</div>
+                                  )}
+                                  {debugData.product_meta_used && (
+                                    <div><span className="font-bold">Metadane produktu:</span> {JSON.stringify(debugData.product_meta_used)}</div>
+                                  )}
+                                  {debugData.gemini_text_response && (
+                                    <div className="text-red-600"><span className="font-bold">Gemini tekst:</span> {debugData.gemini_text_response as string}</div>
+                                  )}
+                                  {debugData.error && (
+                                    <div className="text-red-600"><span className="font-bold">Błąd:</span> {debugData.error as string}</div>
+                                  )}
+                                </div>
+
+                                {/* Full Prompt */}
+                                <div className="px-3 py-2 border-t border-amber-200">
+                                  <div className="text-[10px] font-semibold text-amber-700 mb-1">Pełny prompt:</div>
+                                  <pre className="text-[9px] text-stone-700 bg-white/80 p-2 rounded border border-stone-200 max-h-64 overflow-auto whitespace-pre-wrap font-mono">
+                                    {debugData.prompt as string}
+                                  </pre>
+                                </div>
+                              </div>
+                            )}
+                            {/* === DEBUG SECTION END === */}
                           </div>
                         )}
                       </div>

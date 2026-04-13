@@ -563,8 +563,13 @@ async def render_stream(req: RenderFinalRequest, request: Request):
         yield _sse({"stage": "render", "status": "running",
                      "message": "Renderowanie AI z kalibracją wymiarów (Gemini)…"})
         raw_rendered = None
+        # === DEBUG SECTION START ===
+        render_debug_info: dict = {}
+        # === DEBUG SECTION END ===
         try:
-            raw_rendered = generate_photorealistic_render(
+            # === DEBUG SECTION START ===
+            raw_rendered, render_debug_info = generate_photorealistic_render(
+            # === DEBUG SECTION END ===
                 original=image,
                 composite=composite,
                 product_name=product_name,
@@ -586,6 +591,10 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             timings["render"] = td
             yield _sse({"stage": "render", "status": "error",
                          "error": str(exc), "timing": td})
+
+        # === DEBUG SECTION START ===
+        yield _sse({"stage": "debug", "status": "info", "debug": render_debug_info})
+        # === DEBUG SECTION END ===
 
         # Build final output
         if raw_rendered:
