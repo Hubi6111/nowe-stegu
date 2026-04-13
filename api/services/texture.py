@@ -64,23 +64,46 @@ def close_binary_mask(
     return erode_binary_mask(m, iterations=iterations, kernel_size=kernel_size)
 
 
-def estimate_wall_span_mm(polygon_height_px: float, image_height_px: int) -> float:
+def estimate_wall_span_mm(
+    polygon_height_px: float,
+    image_height_px: int,
+    image_width_px: int = 0,
+) -> float:
     """Estimate real-world height (mm) represented by the polygon's vertical extent.
 
-    Full-height selections (typical wall in frame) map to a standard room height.
-    Short selections (e.g. only upper cabinets) map to a shorter physical span so
-    brick mm/px stays realistic and modules do not look oversized.
+    Uses the FULL IMAGE dimensions (not just the polygon) to determine room
+    proportions. A typical interior photograph captures a room at roughly
+    eye-level, with the ceiling near the top and floor near the bottom.
+
+    Strategy:
+      - The full image height approximates the visible room height (~2850 mm)
+      - The polygon's fraction of the image scales that proportionally
+      - Portrait-oriented images are treated differently (phone photos)
     """
     base = float(os.environ.get("STEGU_ASSUMED_WALL_HEIGHT_MM", str(_DEFAULT_WALL_MM)))
     base = max(2000.0, min(base, 3600.0))
     if image_height_px <= 0:
         return base
+
+    # Detect portrait vs landscape orientation for better room estimation
+    aspect = (image_width_px / image_height_px) if image_width_px > 0 else 1.5
+    if aspect < 1.0:
+        # Portrait photo — camera sees less vertical span, so the full image
+        # height likely captures a smaller portion of the room (~2200mm)
+        room_mm = base * 0.80
+    elif aspect > 2.0:
+        # Ultra-wide panorama — the full image height captures roughly
+        # a full floor-to-ceiling view
+        room_mm = base
+    else:
+        # Standard landscape (1.3–1.8) — most common, captures ~full room
+        room_mm = base
+
     frac = polygon_height_px / float(image_height_px)
-    # Visible wall usually occupies ~0.45–0.95 of image height
-    if frac >= 0.50:
-        return base
-    # Narrow vertical ROI → proportionally shorter physical span
-    return max(950.0, base * max(frac / 0.50, 0.36))
+    # The polygon selection covers this fraction of the visible room
+    wall_mm = room_mm * frac
+    # Clamp so a tiny polygon doesn't produce absurdly small values
+    return max(800.0, min(wall_mm, base * 1.1))
 
 
 def refine_mask_with_boundaries(
@@ -266,12 +289,14 @@ def compute_texture_scale(
     texture_height_px: int,
     meta: dict,
     analysis: dict | None = None,
+    image_width_px: int = 0,
 ) -> float:
     """Map product mm + albedo height to on-screen tile scale (realistic brick size).
 
-    If analysis (from Gemini scene measurement) is provided, uses the AI-calibrated
-    wall dimensions instead of the heuristic. This gives much more accurate sizing
-    since it's based on actual reference objects in the photo.
+    Uses the FULL IMAGE dimensions for context, not just the polygon. The AI
+    scene analysis (when available) provides calibrated wall dimensions from
+    reference objects visible anywhere in the whole photograph (doors, windows,
+    switches, etc.), giving accurate real-world measurements.
     """
     module_h = float(meta.get("moduleHeightMm", 65))
     joint = float(meta.get("jointMm", 10))
@@ -287,15 +312,23 @@ def compute_texture_scale(
         planks = max(1, min(planks, 12))
         albedo_h_mm = module_h * planks + joint * max(planks - 1, 0)
 
-    # Use AI-measured wall height when available and confident
-    if (analysis
-        and analysis.get("confidence") not in (None, "low")
-        and analysis.get("wallHeightCm")):
+    # Always prefer AI-measured wall height when available (any confidence)
+    if analysis and analysis.get("wallHeightCm"):
         wall_mm = float(analysis["wallHeightCm"]) * 10.0
         wall_mm = max(500.0, min(wall_mm, 12000.0))
-        logger.info("Using AI-measured wall height: %.0f mm", wall_mm)
+        confidence = analysis.get("confidence", "unknown")
+        logger.info("Using AI-measured wall height: %.0f mm (confidence: %s)", wall_mm, confidence)
+
+        # Cross-check with ceiling height if available
+        ceiling_cm = analysis.get("ceilingHeightCm")
+        if ceiling_cm:
+            ceiling_mm = float(ceiling_cm) * 10.0
+            if wall_mm > ceiling_mm * 1.1:
+                logger.warning("Wall height (%.0fmm) > ceiling (%.0fmm), clamping", wall_mm, ceiling_mm)
+                wall_mm = ceiling_mm
     else:
-        wall_mm = estimate_wall_span_mm(polygon_height_px, image_height_px)
+        wall_mm = estimate_wall_span_mm(polygon_height_px, image_height_px, image_width_px)
+        logger.info("Using heuristic wall height: %.0f mm (no AI analysis)", wall_mm)
 
     px_per_mm = polygon_height_px / wall_mm
 
@@ -635,9 +668,9 @@ def project_texture(
     poly_h = float(ys.max() - ys.min())
 
     if meta:
-        tex_scale = compute_texture_scale(poly_h, H, texture.height, meta, analysis=analysis)
+        tex_scale = compute_texture_scale(poly_h, H, texture.height, meta, analysis=analysis, image_width_px=W)
     else:
-        wall_mm = estimate_wall_span_mm(poly_h, H)
+        wall_mm = estimate_wall_span_mm(poly_h, H, W)
         px_per_mm = poly_h / wall_mm
         target_tile_h = max(400.0 * px_per_mm, 1.0)
         tex_scale = target_tile_h / float(texture.height)

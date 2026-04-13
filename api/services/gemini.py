@@ -673,184 +673,46 @@ def _build_dimension_instructions(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RENDER_PROMPT_TEMPLATE = """\
-You are a world-class photorealistic PHOTO EDITOR specializing in \
-architectural material visualization. Your job: take an existing \
-COMPOSITE image and make the textured wall area look indistinguishable \
-from a real photograph. This is IMAGE EDITING, not image generation.
+You are a photo compositing tool. You combine two images into one.
 
-YOU RECEIVE FIVE IMAGES (in this exact order):
-  1. ORIGINAL — the unmodified room/building photograph (ground truth)
-  2. COMPOSITE — ORIGINAL with "{product_name}" texture already placed \
-at SCIENTIFICALLY CORRECT real-world scale (computed from millimetre specs)
-  3. MASK OVERLAY — ORIGINAL with ORANGE highlight = target wall area
-  4. PRODUCT TEXTURE TILE — a sample swatch (for color/detail reference only)
-  5. ORIGINAL AGAIN — for direct side-by-side comparison
+IMAGE 1 — ORIGINAL: The unmodified room photograph.
+IMAGE 2 — COMPOSITE: The same photo with "{product_name}" ({material_type}) \
+texture already precisely mapped onto the wall. This texture is FINAL.
+IMAGE 3 — MASK: Shows the wall area with an ORANGE overlay.
 
-╔══════════════════════════════════════════════════════════════════════╗
-║                                                                      ║
-║   #1  ABSOLUTE LAW — PATTERN LOCK                                   ║
-║                                                                      ║
-║   The COMPOSITE (image 2) contains SCIENTIFICALLY CORRECT texture.  ║
-║   It was computed using real product dimensions in millimetres and   ║
-║   calibrated wall measurements. THE PATTERN IS SACRED.              ║
-║                                                                      ║
-║   BEFORE you start editing, COUNT:                                   ║
-║     → How many horizontal rows (courses) of {unit_label}s?          ║
-║     → How many {unit_label}s per row?                                ║
-║     → What is the {joint_label} width relative to {unit_label} size?║
-║                                                                      ║
-║   YOUR OUTPUT MUST HAVE:                                             ║
-║     → The IDENTICAL number of rows                                   ║
-║     → The IDENTICAL number of {unit_label}s per row                  ║
-║     → The IDENTICAL {joint_label} width                              ║
-║     → The IDENTICAL proportions of each {unit_label}                 ║
-║                                                                      ║
-║   ⛔ DO NOT re-draw, re-tile, re-generate, or re-imagine.           ║
-║   ⛔ DO NOT make {unit_label}s wider, narrower, taller, or shorter. ║
-║   ⛔ DO NOT add or remove {unit_label}s.                            ║
-║   ⛔ DO NOT change the {joint_label} width or spacing.              ║
-║   ⛔ If the COMPOSITE shows small, many {unit_label}s — KEEP THEM. ║
-║   ⛔ If the COMPOSITE shows few, large {unit_label}s — KEEP THEM.  ║
-║                                                                      ║
-║   Think of it this way: the COMPOSITE is a photograph of a real     ║
-║   wall with this product already installed. You are merely editing  ║
-║   the photograph to improve realism. You would never change the     ║
-║   bricks in a real photograph. Same here.                           ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
+CRITICAL: Your output must be 95% identical to IMAGE 2 (the COMPOSITE). \
+You are making ONLY these minimal corrections:
 
-╔══════════════════════════════════════════════════════════════════════╗
-║                                                                      ║
-║   #2  ABSOLUTE LAW — WALL SURFACE ONLY                              ║
-║                                                                      ║
-║   The texture MUST cover ONLY the wall surface. It must NEVER       ║
-║   appear on ANY of the following:                                    ║
-║                                                                      ║
-║   ⛔ CEILING — even if the orange mask extends to the top            ║
-║   ⛔ FLOOR — even if the orange mask extends to the bottom           ║
-║   ⛔ ADJACENT WALLS — walls visible at an angle to the left/right    ║
-║   ⛔ DOOR/WINDOW REVEALS — the inner surfaces of openings            ║
-║   ⛔ BASEBOARD/SKIRTING — the trim at the bottom of the wall        ║
-║   ⛔ CROWN MOLDING — the trim at the top of the wall                ║
-║                                                                      ║
-║   If the orange selection extends past the wall boundary, TRIM the  ║
-║   texture AT the wall edge. Show the original ceiling/floor beyond. ║
-║                                                                      ║
-║   The texture stops at:                                              ║
-║   • TOP: the ceiling–wall junction (or bottom of crown molding)      ║
-║   • BOTTOM: the top of the baseboard (or wall–floor junction)        ║
-║   • LEFT/RIGHT: wall corners, door/window frames                    ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-╔══════════════════════════════════════════════════════════════════════╗
-║                                                                      ║
-║   #3  ABSOLUTE LAW — FOREGROUND OBJECT PRESERVATION                 ║
-║                                                                      ║
-║   Objects that are IN FRONT OF the wall MUST be fully visible.       ║
-║   The texture goes BEHIND them. Copy these objects pixel-for-pixel   ║
-║   from the ORIGINAL image onto the textured wall.                    ║
-║                                                                      ║
-║   This includes: furniture, TV, shelves, frames, mirrors, clocks,   ║
-║   lamps, switches, outlets, plants, people, pets, curtains, blinds, ║
-║   radiators, pipes — ANYTHING between the camera and the wall.      ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-════════════════════════════════════════════════════════════════
-YOUR EDITING TASK — apply ONLY these photorealistic adjustments to the \
-COMPOSITE image:
-════════════════════════════════════════════════════════════════
-
-1. LIGHTING TRANSFER — Study the ORIGINAL image's lighting carefully. \
-Apply the EXACT SAME lighting conditions to the textured wall:
-   • Match brightness gradient (which side is brighter/darker)
-   • Match color temperature (warm/cool tint)
-   • If there's a window casting light — the wall near the window \
-should be brighter, gradually darkening away from it
-   • Apply the same exposure level as the ORIGINAL
-
-2. SURFACE RELIEF — Add physical depth to the {unit_label}s:
-   • Each {unit_label} has {bump_depth}mm of relief
-   • Cast micro-shadows on the {shadow_edge} (shadow direction \
-must match the ORIGINAL's light direction)
-   • {joint_label}s are recessed — they appear darker than faces
-   • Light-facing edges get subtle highlight, shadow-facing get darker
-
-3. AMBIENT OCCLUSION — Add darkening at junctions:
-   • Thin shadow line where wall meets ceiling
-   • Thin shadow line where wall meets floor/baseboard
-   • Darker zones in corners where walls meet
-   • Contact shadows behind furniture touching the wall
-
-4. FOREGROUND RESTORATION — For EVERY object in front of the wall:
-   • Copy the object from the ORIGINAL image
-   • Place it on TOP of the textured wall
-   • Match the exact position, size, and edges from the ORIGINAL
-   • Include the object's shadow on the wall if visible in ORIGINAL
-
-5. NON-WALL PRESERVATION — Everything outside the wall area MUST be \
-pixel-identical to the ORIGINAL:
-   • Floor, ceiling, adjacent walls — untouched
-   • Furniture, objects, decorations — untouched
-   • Door/window reveals — untouched
-
-════════════════════════════════════════════════════════════════
-FOREGROUND OBJECTS TO RESTORE FROM ORIGINAL:
-════════════════════════════════════════════════════════════════
-
+1. RESTORE FOREGROUND OBJECTS — Look at IMAGE 1 (ORIGINAL). Any object \
+that is physically IN FRONT of the wall (furniture, TV, shelves, plants, \
+lamps, frames, switches, cables, curtains, people) must appear ON TOP \
+of the texture. Copy these objects pixel-for-pixel from the ORIGINAL \
+and layer them over the COMPOSITE. The texture goes BEHIND them.
 {occluder_list}
 
-Even if an object is NOT listed above — if you see ANYTHING in the \
-ORIGINAL that should be in front of the wall, RESTORE IT.
+2. TRIM WALL BOUNDARIES — If the texture extends beyond the actual wall \
+surface (onto ceiling, floor, adjacent walls, baseboards, door frames), \
+replace those areas with the ORIGINAL image pixels. The texture covers \
+ONLY the flat wall surface.
 
-════════════════════════════════════════════════════════════════
-PRODUCT DIMENSIONS (for scale verification only — do NOT re-tile):
-════════════════════════════════════════════════════════════════
+3. SUBTLE LIGHTING — Very slightly adjust the texture brightness to match \
+the ORIGINAL's lighting direction. This should be barely noticeable — \
+do NOT dramatically change the texture colors or brightness.
 
-{dimension_instructions}
+ABSOLUTE RULES:
+⛔ Do NOT re-draw, re-tile, re-generate, or re-imagine the texture
+⛔ Do NOT change the texture scale, pattern, count, or spacing
+⛔ Do NOT change texture colors — preserve them from the COMPOSITE
+⛔ Do NOT zoom, crop, pan, or change the resolution
+⛔ Keep everything outside the wall IDENTICAL to the ORIGINAL
+⛔ Keep the wall texture IDENTICAL to the COMPOSITE except for the \
+3 corrections above
 
-════════════════════════════════════════════════════════════════
-SURFACE PHYSICS:
-════════════════════════════════════════════════════════════════
+Think of it this way: you are doing a Photoshop layer operation. \
+The COMPOSITE is the bottom layer. You cut out foreground objects \
+from the ORIGINAL and paste them on top. That is ALL you do.
 
-{surface_rendering}
-Relief depth: {bump_depth}mm → micro-shadows on {shadow_edge}
-{joint_label}s are recessed into the wall → always darker than {unit_label} faces
-Joint color: typically darker gray/charcoal, NOT white
-{unit_label} faces: preserve the COMPOSITE's color and texture exactly
-
-════════════════════════════════════════════════════════════════
-LIGHTING (replicate from ORIGINAL photograph):
-════════════════════════════════════════════════════════════════
-
-  • Primary: {lighting_primary} (~{lighting_kelvin}K {lighting_temperature})
-  • Gradient: {lighting_gradient}
-  • Shadows: {shadow_type}, intensity {shadow_intensity}
-  • Ambient occlusion: {ambient_occlusion}
-  • Color cast: {color_cast}
-  • {temperature_effect}
-
-════════════════════════════════════════════════════════════════
-PERSPECTIVE:
-════════════════════════════════════════════════════════════════
-
-{perspective_instructions}
-
-╔══════════════════════════════════════════════════════════════╗
-║  FINAL CHECKLIST — verify ALL before outputting:            ║
-║                                                              ║
-║  ☐ COUNT {unit_label}s/rows — SAME as COMPOSITE?            ║
-║  ☐ Each {unit_label} SAME size as in COMPOSITE?             ║
-║  ☐ Texture ONLY on wall — NOT on ceiling/floor/other walls? ║
-║  ☐ ALL foreground objects from ORIGINAL restored?           ║
-║  ☐ Lighting gradient matches ORIGINAL?                      ║
-║  ☐ Contact shadows present where objects meet wall?         ║
-║  ☐ Same image resolution and aspect ratio — NO crop/zoom?  ║
-║  ☐ Everything outside wall = ORIGINAL?                       ║
-╚══════════════════════════════════════════════════════════════╝
-
-Output ONLY the final photorealistic image. No text, no commentary.
+Output ONLY the final image. No text.
 """
 
 
@@ -940,134 +802,48 @@ def generate_photorealistic_render(
     material_type: str = "decorative stone/brick",
     product_meta: dict | None = None,
 ) -> Image.Image | None:
-    """Stage 2: Generate photorealistic render with 5 reference images."""
+    """Stage 2: Generate photorealistic render.
+
+    Sends 3 images to Gemini:
+      1. ORIGINAL photograph (ground truth for lighting, objects)
+      2. COMPOSITE with texture already mapped (from deterministic projection)
+      3. MASK OVERLAY showing wall area
+
+    The AI's job: integrate the composite realistically — mask foreground
+    objects, match lighting, fix wall boundaries. It does NOT re-generate
+    the texture; it only makes the existing composite look photorealistic.
+    """
     from google.genai import types
 
     model_name = image_model_name()
     client = _gemini_client()
 
     meta = product_meta or {}
-    layout = meta.get("layoutType", "running-bond")
     category = meta.get("category", "brick")
-    is_brick = layout in ("running-bond", "stretcher-bond")
-    is_stone = layout == "random-stone"
-    is_wood = category == "wood"
-
-    unit_label = "stone" if is_stone else "panel" if is_wood else "brick"
-    joint_label = "mortar joint" if (is_brick or is_stone) else "gap"
-    course_label = "stone rows" if is_stone else "panel rows" if is_wood else "brick courses"
-
-    roughness = float(meta.get("roughness", 0.7))
-    bump_depth = float(meta.get("bumpDepthMm", 5))
-    specular = float(meta.get("specularIntensity", 0.05))
-    surface_desc = meta.get("surfaceDescription", "matte surface with subtle texture")
-
-    if roughness > 0.7:
-        surface_rendering = (
-            f"ROUGH MATTE material ({roughness*100:.0f}% roughness). "
-            f"ZERO specular highlights, ZERO shine. "
-            f"Light scatters diffusely — no glossy spots. "
-            f"Surface character: {surface_desc}"
-        )
-    elif roughness > 0.5:
-        surface_rendering = (
-            f"Near-matte surface ({roughness*100:.0f}% roughness). "
-            f"Extremely subtle light variation, but NO specular spots. "
-            f"Surface character: {surface_desc}"
-        )
-    else:
-        surface_rendering = (
-            f"Subtle satin sheen ({roughness*100:.0f}% roughness, "
-            f"{specular*100:.0f}% specular). "
-            f"Soft diffuse reflection visible only at oblique angles. "
-            f"Surface character: {surface_desc}"
-        )
-
-    shadow_edge = "bottom and right edges" if is_brick or is_stone else "gap edges"
-
-    # Extract lighting from analysis
-    a = analysis or {}
-    lt = a.get("lighting", {})
-    lighting_primary = lt.get("primarySource", str(a.get("lighting_direction", "diffuse")))
-    lighting_temp = lt.get("temperature", str(a.get("lighting_temperature", "neutral")))
-    lighting_kelvin = lt.get("temperatureKelvin", 5000)
-    lighting_gradient = lt.get("gradient", "even")
-    shadow_type = lt.get("shadowType", str(a.get("shadow_intensity", "soft-diffuse")))
-    shadow_intensity = lt.get("shadowIntensity", 0.3)
-    ambient_occlusion = lt.get("ambientOcclusion", "subtle at junctions")
-    color_cast = lt.get("colorCast", "none")
-    exposure = lt.get("exposure", "correct")
-
-    if lighting_temp in ("warm", "neutral-warm"):
-        temperature_effect = (
-            "Warm light tints the wall surface slightly orange/yellow — "
-            "apply the SAME warmth visible in the ORIGINAL, not more, not less"
-        )
-    elif lighting_temp in ("cool", "neutral-cool"):
-        temperature_effect = (
-            "Cool light tints the wall slightly blue — "
-            "apply the SAME cool tint visible in the ORIGINAL"
-        )
-    else:
-        temperature_effect = (
-            "Neutral light — minimal color shift. "
-            "Match the ORIGINAL's color temperature exactly"
-        )
-
-    dim_instructions = _build_dimension_instructions(meta, material_type, analysis)
     occluder_list = _build_occluder_list(analysis)
-    perspective_instructions = _build_perspective_instructions(analysis)
 
     prompt = _RENDER_PROMPT_TEMPLATE.format(
-        dimension_instructions=dim_instructions,
         occluder_list=occluder_list,
-        perspective_instructions=perspective_instructions,
-        unit_label=unit_label,
-        joint_label=joint_label,
-        course_label=course_label,
-        lighting_primary=lighting_primary,
-        lighting_temperature=lighting_temp,
-        lighting_kelvin=lighting_kelvin,
-        lighting_gradient=lighting_gradient,
-        shadow_type=shadow_type,
-        shadow_intensity=shadow_intensity,
-        ambient_occlusion=ambient_occlusion,
-        color_cast=color_cast,
-        exposure=exposure,
-        temperature_effect=temperature_effect,
-        surface_rendering=surface_rendering,
-        bump_depth=bump_depth,
-        shadow_edge=shadow_edge,
         product_name=str(product_name or "product"),
         material_type=str(material_type),
     )
 
-    # Send 5 images: original, composite, mask, texture tile, original again
+    # Send 3 images: original, composite, mask overlay
     parts: list = [
         types.Part.from_text(text=prompt),
         types.Part.from_bytes(data=_pil_to_bytes(original), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(composite), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(mask_overlay), mime_type="image/jpeg"),
     ]
-    if product_texture:
-        parts.append(
-            types.Part.from_bytes(
-                data=_pil_to_bytes(product_texture), mime_type="image/jpeg",
-            )
-        )
-    # Add original again as reference #5 for comparison
-    parts.append(
-        types.Part.from_bytes(data=_pil_to_bytes(original), mime_type="image/jpeg"),
-    )
 
-    logger.info("Gemini photorealistic render — model: %s, images: %d", model_name, len(parts) - 1)
+    logger.info("Gemini photorealistic render — model: %s, images: 3", model_name)
     response = None
     try:
         response = _retry_generate(
             client, model=model_name, contents=parts,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],
-                temperature=0.1,
+                temperature=0.2,
             ),
         )
     except Exception as exc:
@@ -1097,96 +873,37 @@ def generate_photorealistic_render(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _VERIFICATION_PROMPT = """\
-You are a photorealistic rendering QA engineer performing a FINAL quality \
-check. You must compare the RENDERED image with the ORIGINAL photograph \
-and correct ANY issues. This is SURGICAL CORRECTION, not re-creation.
+You are a photo QA engineer. Compare the RENDERED image with the ORIGINAL \
+photograph and fix any remaining issues. This is surgical correction only.
 
-YOU RECEIVE FOUR IMAGES:
-  1. ORIGINAL — the unmodified room photograph (GROUND TRUTH for everything \
-except the wall texture)
-  2. RENDERED — the AI visualization that needs QA and correction
-  3. MASK OVERLAY — ORIGINAL with ORANGE highlight = target wall area
-  4. PRODUCT TEXTURE TILE — the decorative material being applied
+IMAGE 1 — ORIGINAL: The unmodified room photo (ground truth)
+IMAGE 2 — RENDERED: The AI visualization to check and correct
+IMAGE 3 — MASK: ORIGINAL with ORANGE overlay showing the wall area
 
-╔══════════════════════════════════════════════════════════════════════╗
-║  PATTERN LOCK: Do NOT change the texture pattern, scale, or count. ║
-║  Keep the SAME number, size, and spacing of all elements.          ║
-║  Do NOT make bricks/panels/stones wider, narrower, or fewer.      ║
-║  The texture in the RENDERED is considered correct — only fix      ║
-║  photorealistic integration issues.                                ║
-╚══════════════════════════════════════════════════════════════════════╝
+FIX THESE ISSUES IF FOUND:
 
-════════════════════════════════════════════════════════════════
-EXECUTE THIS QA CHECKLIST — fix every issue you find:
-════════════════════════════════════════════════════════════════
+1. COVERED OBJECTS — If any object visible in the ORIGINAL (furniture, TV, \
+frames, plants, lamps, switches, people) is now hidden behind the texture, \
+RESTORE it from the ORIGINAL. Objects go IN FRONT of the texture.
 
-CHECK 1: FOREGROUND OBJECT OCCLUSION
-  Compare RENDERED with ORIGINAL pixel by pixel in the wall area:
-  • Is ANY object that was visible in the ORIGINAL now covered by texture?
-  • Check for: furniture, TV, frames, mirrors, shelves, clocks, switches, \
-outlets, plants, lamps, sconces, radiators, pipes, decorations, people
-  • If you find a covered object → RESTORE IT from the ORIGINAL
-  • The texture must go BEHIND all objects — objects are IN FRONT
-  • Pay special attention to:
-    - Objects partially in front of the wall (e.g., sofa top peeking above)
-    - Thin objects (cables, lamp cords, curtain edges)
-    - Small objects (switches, outlets, small frames)
+2. BOUNDARY LEAKS — If texture appears on the ceiling, floor, adjacent \
+walls, baseboards, or door/window frames, REMOVE it and show the ORIGINAL \
+surface instead. Texture covers ONLY the wall.
 
-CHECK 2: BOUNDARY LEAKS
-  Compare the wall boundaries in RENDERED vs ORIGINAL:
-  • Has texture LEAKED onto the CEILING? → Remove it, show original ceiling
-  • Has texture LEAKED onto the FLOOR? → Remove it, show original floor
-  • Has texture LEAKED onto ADJACENT WALLS? → Remove it, show original wall
-  • Has texture covered the BASEBOARD? → Remove it, show original baseboard
-  • Has texture covered DOOR/WINDOW FRAMES? → Remove it, show original
-  • Has texture covered CROWN MOLDING? → Remove, show original
-  • The texture must stop PRECISELY at the wall boundary
-  • If in doubt: compare with the ORIGINAL — which surfaces had the \
-original wall paint/finish? Only THOSE surfaces get texture.
+3. LIGHTING — If the wall brightness or color doesn't match the ORIGINAL, \
+adjust it. The textured wall should have the same lighting gradient and \
+color temperature as the ORIGINAL.
 
-CHECK 3: LIGHTING MATCH
-  Compare the overall brightness and color of RENDERED vs ORIGINAL:
-  • Does the brightness gradient match? (Is the same side brighter/darker?)
-  • Is the color temperature similar? (Warm/cool tint must match)
-  • Are there artificial-looking dark or bright patches on the wall?
-  • Are contact shadows present where furniture touches the wall?
-  • Is the exposure level similar? (Not overly bright or dark)
-  If mismatched → Adjust the wall texture brightness/tint to match ORIGINAL
+4. EDGES — Transitions at wall boundaries should look natural with thin \
+shadow lines at ceiling/floor junctions.
 
-CHECK 4: EDGE QUALITY
-  Examine all transition zones:
-  • Wall-to-ceiling junction: thin, natural shadow line?
-  • Wall-to-floor junction: clean transition with baseboard visible?
-  • Wall corners: natural shadow in the corner?
-  • Around door/window frames: clean edge, no texture overlap?
-  • Furniture edges: natural contact shadow, no hard cutline?
-  If harsh or unnatural → Smooth the transitions
+RULES:
+• Do NOT change the texture pattern, scale, count, or spacing
+• Same resolution and aspect ratio — no crop/zoom/pan
+• Everything outside the wall = ORIGINAL unchanged
+• If no issues found, return the RENDERED image unchanged
 
-CHECK 5: TEXTURE INTEGRITY (verify, don't change)
-  • Is the texture count (rows and columns) the same as in the RENDERED?
-  • Are the texture elements distorted or warped unnaturally?
-  • If the texture appears correct → DO NOT CHANGE IT
-  • Only fix color/lighting issues, never re-tile
-
-CHECK 6: RESOLUTION & FRAMING
-  • Is the output the SAME resolution as the inputs?
-  • Is there any unwanted zoom, crop, or pan?
-  • Is the aspect ratio preserved?
-  If yes to any issue → Fix it
-
-════════════════════════════════════════════════════════════════
-RULES FOR CORRECTION:
-════════════════════════════════════════════════════════════════
-
-  • SAME resolution and aspect ratio — NO crop/zoom/pan/reframe
-  • Everything outside the wall area = pixel-identical to ORIGINAL
-  • Do NOT re-generate or re-draw the texture — only fix integration
-  • Do NOT change the texture pattern, scale, count, or spacing
-  • If the RENDERED has NO issues → return it UNCHANGED
-  • The goal is a result where a viewer cannot tell the texture was \
-digitally added — it must look like a real installed material
-
-Output ONLY the corrected image. No text, no commentary.
+Output ONLY the corrected image. No text.
 """
 
 
@@ -1196,7 +913,7 @@ def verify_and_correct_render(
     mask_overlay: Image.Image,
     product_texture: Image.Image | None = None,
 ) -> Image.Image | None:
-    """Stage 3: Compare render with original, fix occlusion, boundaries & lighting."""
+    """Stage 3: Compare render with original, fix remaining issues."""
     from google.genai import types
 
     model_name = image_model_name()
@@ -1208,12 +925,6 @@ def verify_and_correct_render(
         types.Part.from_bytes(data=_pil_to_bytes(rendered), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(mask_overlay), mime_type="image/jpeg"),
     ]
-    if product_texture:
-        parts.append(
-            types.Part.from_bytes(
-                data=_pil_to_bytes(product_texture), mime_type="image/jpeg",
-            )
-        )
 
     logger.info("Gemini verification pass — model: %s", model_name)
     response = None
@@ -1222,7 +933,7 @@ def verify_and_correct_render(
             client, model=model_name, contents=parts,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],
-                temperature=0.1,
+                temperature=0.2,
             ),
         )
     except Exception as exc:
@@ -1240,6 +951,9 @@ def verify_and_correct_render(
     if tx:
         logger.warning("Gemini verification returned text: %s", tx[:300])
     return None
+
+
+
 
 
 # ── Legacy single-call refine (kept for /api/render-refine) ────────────────
