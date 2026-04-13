@@ -1,5 +1,20 @@
 [
   {
+    "id": "20260413-223852-f19f73",
+    "timestamp": "2026-04-13 22:38:52",
+    "client_ip": "127.0.0.1",
+    "product_id": "monsanto-1",
+    "product_name": "Monsanto 1",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.02,
+      "texture": 0.41,
+      "render": 23.72,
+      "total": 24.29
+    },
+    "has_image": true
+  },
+  {
     "id": "20260413-223433-ba8523",
     "timestamp": "2026-04-13 22:34:33",
     "client_ip": "127.0.0.1",

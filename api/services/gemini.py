@@ -681,7 +681,9 @@ texture overlaid on the wall.
 IMAGE 2 — ORIGINAL: The room without any texture.
 
 IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material \
-showing the real colors and surface detail.
+showing the real colors and surface detail. The texture in the final \
+result must look EXACTLY like this photo — same colors, same grain, \
+same surface quality.
 
 YOUR JOB — this is a COPY operation, not a creative task:
 
@@ -690,7 +692,8 @@ YOUR JOB — this is a COPY operation, not a creative task:
 Every slat, every brick, every panel, every gap must be in the EXACT \
 same position, same size, same spacing, same pattern as in IMAGE 1. \
 Do NOT re-draw or re-interpret the texture in any way.
-3. The colors of the texture should match IMAGE 3 (the swatch photo)
+3. The colors and surface detail must match IMAGE 3 (the swatch photo) \
+— identical hue, saturation, grain, relief
 4. From IMAGE 2 (original), copy back any objects that are IN FRONT of \
 the wall — furniture, TV, plants, lamps, frames, switches, people. \
 These objects must appear ON TOP of the texture.
@@ -698,6 +701,20 @@ These objects must appear ON TOP of the texture.
 walls, baseboards, door frames) — show IMAGE 2 (original) instead.
 6. Apply subtle lighting from IMAGE 2 — very slight brightness \
 adjustment only, do NOT change the texture colors.
+
+SCALE VERIFICATION — check dimensions against reference points:
+Look at IMAGE 2 (original) and identify reference objects to verify scale:
+  • Door height ≈ 200cm
+  • Room/ceiling height ≈ 270cm
+  • Light switch height ≈ 115cm from floor
+  • Power outlet height ≈ 30cm from floor
+  • Standard door width ≈ 80-90cm
+  • Standard window sill height ≈ 90cm
+{dimensions_info}
+Use these reference points to verify that the texture elements in \
+IMAGE 1 are the correct real-world size. The texture in IMAGE 1 was \
+pre-calculated using these exact dimensions — trust it and copy it.
+
 {gap_info}
 
 CRITICAL — the texture pattern must be 100% IDENTICAL to IMAGE 1:
@@ -711,6 +728,7 @@ slats in the EXACT same positions
 ⛔ Do NOT change the number, spacing, or positions of elements
 ⛔ Do NOT crop, zoom, or resize
 ⛔ COPY the texture from IMAGE 1, that is ALL
+⛔ Texture MUST look like IMAGE 3 — same colors, same detail
 
 Output ONLY the image.
 """
@@ -755,10 +773,36 @@ def generate_photorealistic_render(
     else:
         gap_info = ""
 
+    # Build dimension info from product metadata
+    module_h_mm = float(meta.get("moduleHeightMm", 65))
+    module_w_mm = float(meta.get("moduleWidthMm", 250))
+    module_h_cm = module_h_mm / 10.0
+    module_w_cm = module_w_mm / 10.0
+    layout = meta.get("layoutType", "running-bond")
+
+    dim_lines = [f"The product \"{product_name}\" has these real dimensions:"]
+    if "lamel" in material_type.lower() or "panel" in material_type.lower() or "slat" in layout.lower() or layout == "vertical-stack":
+        dim_lines.append(f"  • Each slat/panel is {module_w_cm:.1f}cm wide and {module_h_cm:.1f}cm tall")
+        if joint_cm >= 1.0:
+            dim_lines.append(f"  • Gap between slats: {joint_cm:.1f}cm")
+        bricks_in_door = int(200 / module_w_cm) if module_w_cm > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_door} slats would fit across a 200cm door width")
+    else:
+        dim_lines.append(f"  • Each brick/module is {module_w_cm:.1f}cm wide × {module_h_cm:.1f}cm tall")
+        if joint_cm > 0:
+            dim_lines.append(f"  • Joint/mortar gap: {joint_cm:.1f}cm")
+        bricks_in_door = int(200 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_door} bricks should fit vertically in a 200cm door height")
+        bricks_in_room = int(270 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
+        dim_lines.append(f"  • ~{bricks_in_room} bricks should fit vertically in a 270cm room height")
+
+    dimensions_info = "\n".join(dim_lines)
+
     prompt = _RENDER_PROMPT_TEMPLATE.format(
         product_name=str(product_name or "product"),
         material_type=str(material_type),
         gap_info=gap_info,
+        dimensions_info=dimensions_info,
     )
 
     # Send 3 images: composite ("bez ai"), original, product texture
