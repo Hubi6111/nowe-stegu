@@ -32,6 +32,8 @@ from services.texture import (
     refine_mask_with_boundaries,
     render_mask_overlay,
     project_texture,
+    generate_geometry_guide,
+    generate_wall_mask_image,
     masked_composite,
     mask_to_b64,
     decode_mask_b64,
@@ -354,13 +356,20 @@ async def render_final(req: RenderFinalRequest, request: Request):
 
             # ── Stage 2: Photorealistic render ────────────────────────────
             t3 = time.time()
+            # Generate geometry guide + wall mask for 4-image pipeline
+            guide = generate_geometry_guide(
+                image, final_mask, texture, meta=meta,
+                polygon=scaled_polygon, analysis=analysis,
+            )
+            wall_mask_img = generate_wall_mask_image(
+                final_mask, target_size=(image.width, image.height)
+            )
             raw_rendered = generate_photorealistic_render(
                 original=image,
-                composite=composite,
-                mask_overlay=mask_overlay,
+                wall_mask_image=wall_mask_img,
+                geometry_guide=guide,
                 product_name=product_name,
                 product_texture=texture,
-                analysis=analysis,
                 material_type=material_type,
                 product_meta=meta,
             )
@@ -503,16 +512,28 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             yield _sse({"stage": "done", "ok": False, "error": str(exc)})
             return
 
-        # ── Stage 2: Texture projection (deterministic, no AI) ────────────
+        # ── Stage 2: Deterministic geometry + texture projection ───────────
         t1 = time.time()
         yield _sse({"stage": "texture", "status": "running",
                      "message": "Projekcja tekstury na ścianę…"})
         try:
             meta, texture = load_product(req.product_id)
+            # Composite ("Bez AI") — full blend for preview / fallback
             composite = project_texture(
                 image, final_mask, texture, meta=meta, polygon=scaled_polygon
             )
             composite_b64 = image_to_b64(composite)
+
+            # Geometry guide — clean texture layout, no lighting effects
+            geometry_guide = generate_geometry_guide(
+                image, final_mask, texture, meta=meta, polygon=scaled_polygon
+            )
+
+            # Wall mask image — white-on-black for AI
+            wall_mask_img = generate_wall_mask_image(
+                final_mask, target_size=(image.width, image.height)
+            )
+
             td = round(time.time() - t1, 2)
             timings["texture"] = td
             yield _sse({"stage": "texture", "status": "done", "timing": td,
@@ -549,9 +570,20 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 thumb.save(buf, format="JPEG", quality=70)
                 return base64.b64encode(buf.getvalue()).decode()
 
+            def _thumb_b64_png(img: Image.Image, max_side: int = 400) -> str:
+                if img.mode != "L":
+                    img = img.convert("L")
+                w, h = img.size
+                ratio = min(max_side / w, max_side / h)
+                thumb = img.resize((int(w * ratio), int(h * ratio)), Image.NEAREST)
+                buf = io.BytesIO()
+                thumb.save(buf, format="PNG")
+                return base64.b64encode(buf.getvalue()).decode()
+
             debug_images = {
-                "composite_bez_ai": _thumb_b64(composite),
                 "original": _thumb_b64(image),
+                "wall_mask": _thumb_b64_png(wall_mask_img),
+                "geometry_guide": _thumb_b64(geometry_guide),
             }
             if texture:
                 debug_images["texture_swatch"] = _thumb_b64(texture)
@@ -561,7 +593,8 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 "prompt": debug_prompt,
                 "images": debug_images,
                 "model": image_model_name(),
-                "temperature": 0.05,
+                "temperature": 0.2,
+                "prompt_type": "lamel" if meta.get("layoutType") == "vertical-stack" or "lamel" in material_type.lower() else "brick",
                 "product_meta": {
                     k: meta.get(k)
                     for k in ["name", "materialType", "layoutType",
@@ -574,7 +607,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             pass  # debug is non-critical
         # ── END DEBUG SECTION ──
 
-        # ── Stage 3: AI Render (3 images: composite, original, texture) ───
+        # ── Stage 3: AI Render (4 images: original, mask, guide, swatch) ──
         t2 = time.time()
         yield _sse({"stage": "render", "status": "running",
                      "message": "Renderowanie AI — analiza sceny, kompozycja, oświetlenie (Gemini)…"})
@@ -582,7 +615,8 @@ async def render_stream(req: RenderFinalRequest, request: Request):
         try:
             raw_rendered = generate_photorealistic_render(
                 original=image,
-                composite=composite,
+                wall_mask_image=wall_mask_img,
+                geometry_guide=geometry_guide,
                 product_name=product_name,
                 product_texture=texture,
                 material_type=material_type,
@@ -602,7 +636,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             yield _sse({"stage": "render", "status": "error",
                          "error": str(exc), "timing": td})
 
-        # Build final output
+        # Build final output — safety composite to enforce wall boundary
         if raw_rendered:
             final_output = masked_composite(
                 image, raw_rendered, final_mask, feather_radius=3

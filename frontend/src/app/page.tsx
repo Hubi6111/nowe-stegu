@@ -446,6 +446,7 @@ export default function Home() {
     model?: string;
     temperature?: number;
     product_meta?: Record<string, unknown>;
+    prompt_type?: string;
   } | null>(null);
   // ── END DEBUG STATE ──
 
@@ -629,6 +630,7 @@ export default function Home() {
               model: evt.model as string | undefined,
               temperature: evt.temperature as number | undefined,
               product_meta: evt.product_meta as Record<string, unknown> | undefined,
+              prompt_type: evt.prompt_type as string | undefined,
             });
             setDebugOpen(true);
             continue;
@@ -963,30 +965,42 @@ export default function Home() {
                                   </span>
                                   <span className="text-[10px] text-stone-400">
                                     {debugData.model} · temp: {debugData.temperature}
+                                    {debugData.prompt_type && (
+                                      <span className="ml-2 px-1.5 py-0.5 text-[8px] font-bold bg-[#0f3460] text-[#e94560] rounded">
+                                        {debugData.prompt_type.toUpperCase()}
+                                      </span>
+                                    )}
                                   </span>
                                 </div>
 
                                 {/* Images sent to Gemini */}
                                 {debugData.images && (
                                   <div className="px-4 py-3 border-b border-[#0f3460]">
-                                    <p className="text-[10px] font-bold text-[#e94560] mb-2 uppercase tracking-wider">Obrazy wysłane do Gemini</p>
-                                    <div className="grid grid-cols-3 gap-2">
-                                      {Object.entries(debugData.images).map(([key, b64]) => (
-                                        <div key={key} className="flex flex-col items-center gap-1">
-                                          <div className="rounded-lg overflow-hidden border border-[#0f3460] bg-black">
-                                            <img
-                                              src={`data:image/jpeg;base64,${b64}`}
-                                              alt={key}
-                                              className="w-full h-auto max-h-32 object-contain"
-                                            />
+                                    <p className="text-[10px] font-bold text-[#e94560] mb-2 uppercase tracking-wider">Obrazy wysłane do Gemini (4-image pipeline)</p>
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                                      {Object.entries(debugData.images).map(([key, b64]) => {
+                                        const mime = key === 'wall_mask' ? 'image/png' : 'image/jpeg';
+                                        const labels: Record<string, string> = {
+                                          original: 'IMAGE 1 — Oryginał',
+                                          wall_mask: 'IMAGE 2 — Maska ściany',
+                                          geometry_guide: 'IMAGE 3 — Geometria',
+                                          texture_swatch: 'IMAGE 4 — Tekstura',
+                                        };
+                                        return (
+                                          <div key={key} className="flex flex-col items-center gap-1">
+                                            <div className="rounded-lg overflow-hidden border border-[#0f3460] bg-black">
+                                              <img
+                                                src={`data:${mime};base64,${b64}`}
+                                                alt={key}
+                                                className="w-full h-auto max-h-32 object-contain"
+                                              />
+                                            </div>
+                                            <span className="text-[9px] text-stone-400 text-center">
+                                              {labels[key] || key}
+                                            </span>
                                           </div>
-                                          <span className="text-[9px] text-stone-400 text-center">
-                                            {key === 'composite_bez_ai' ? 'IMAGE 1 — Bez AI' :
-                                             key === 'original' ? 'IMAGE 2 — Oryginał' :
-                                             'IMAGE 3 — Tekstura'}
-                                          </span>
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 )}

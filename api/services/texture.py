@@ -741,6 +741,109 @@ def project_texture(
     return Image.fromarray(result)
 
 
+# ── Geometry guide + wall mask generators (for AI pipeline v2) ────────────
+
+
+def generate_geometry_guide(
+    room: Image.Image,
+    mask: np.ndarray,
+    texture: Image.Image,
+    meta: dict | None = None,
+    polygon: list[dict] | None = None,
+    analysis: dict | None = None,
+) -> Image.Image:
+    """Generate a clean geometry guide image for the AI renderer.
+
+    The guide shows the exact tiled texture (correct scale, spacing,
+    perspective) on the original room photo, masked to the wall area only.
+    NO color matching, NO luminance overlay, NO noise — just the raw
+    texture laid out deterministically on the wall.
+
+    This is the "locked blueprint" that the AI must not alter.
+    """
+    H, W = mask.shape
+    room_resized = room.resize((W, H), Image.LANCZOS)
+    room_arr = np.array(room_resized).astype(np.float32) / 255.0
+
+    ys, xs = np.where(mask > 0)
+    if len(ys) == 0:
+        return room_resized
+
+    poly_h = float(ys.max() - ys.min())
+
+    if meta:
+        tex_scale = compute_texture_scale(
+            poly_h, H, texture.height, meta, analysis=analysis, image_width_px=W
+        )
+    else:
+        wall_mm = estimate_wall_span_mm(poly_h, H, W)
+        px_per_mm = poly_h / wall_mm
+        target_tile_h = max(400.0 * px_per_mm, 1.0)
+        tex_scale = target_tile_h / float(texture.height)
+
+    scaled_w = max(int(texture.width * tex_scale), 1)
+    scaled_h = max(int(texture.height * tex_scale), 1)
+
+    tex_resized = texture.resize((scaled_w, scaled_h), Image.LANCZOS)
+    tex_arr = np.array(tex_resized).astype(np.float32) / 255.0
+
+    # Tile anchored to bottom-left (same as project_texture)
+    y_ref = int(ys.max())
+    x_ref = int(xs.min())
+    k_y = math.ceil(y_ref / scaled_h) if scaled_h > 0 else 0
+    k_x = math.ceil(x_ref / scaled_w) if scaled_w > 0 else 0
+    y_start = y_ref - k_y * scaled_h
+    x_start = x_ref - k_x * scaled_w
+
+    tiled = np.zeros_like(room_arr)
+    y = y_start
+    while y < H:
+        x = x_start
+        while x < W:
+            src_y0 = max(y, 0)
+            src_x0 = max(x, 0)
+            src_y1 = min(y + scaled_h, H)
+            src_x1 = min(x + scaled_w, W)
+            if src_y1 > src_y0 and src_x1 > src_x0:
+                ty0 = src_y0 - y
+                tx0 = src_x0 - x
+                tiled[src_y0:src_y1, src_x0:src_x1] = tex_arr[
+                    ty0: ty0 + (src_y1 - src_y0),
+                    tx0: tx0 + (src_x1 - src_x0),
+                ]
+            x += scaled_w
+        y += scaled_h
+
+    # Perspective warp (same as project_texture)
+    try:
+        tiled = _perspective_warp(tiled, mask, polygon=polygon)
+    except Exception:
+        pass
+
+    # Composite: texture on wall, original everywhere else
+    # Hard mask — no feathering, no blending
+    mask_3d = mask[:, :, np.newaxis].astype(np.float32)
+    result = room_arr * (1.0 - mask_3d) + tiled * mask_3d
+    result = np.clip(result * 255, 0, 255).astype(np.uint8)
+    return Image.fromarray(result)
+
+
+def generate_wall_mask_image(
+    mask: np.ndarray,
+    target_size: tuple[int, int] | None = None,
+) -> Image.Image:
+    """Convert a binary numpy mask to a clean white-on-black PIL Image.
+
+    White = wall (editable area), Black = everything else (immutable).
+    If target_size is (W, H), resize to match the original image dimensions.
+    """
+    mask_uint8 = (mask * 255).astype(np.uint8)
+    img = Image.fromarray(mask_uint8, mode="L")
+    if target_size and img.size != target_size:
+        img = img.resize(target_size, Image.NEAREST)
+    return img
+
+
 # ── Post-Gemini masked composite ─────────────────────────────────────────────
 
 

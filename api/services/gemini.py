@@ -672,63 +672,98 @@ def _build_dimension_instructions(
 # STAGE 2: Photorealistic Render
 # ══════════════════════════════════════════════════════════════════════════════
 
-_RENDER_PROMPT_TEMPLATE = """\
-You receive 3 images:
+# ══════════════════════════════════════════════════════════════════════════════
+# PROMPT TEMPLATES — separated for lamellas vs bricks
+# 4-image input: Original, Wall Mask, Geometry Guide, Swatch
+# ══════════════════════════════════════════════════════════════════════════════
 
-IMAGE 1 — "BEZ AI": The original room with "{product_name}" ({material_type}) \
-texture overlaid on the wall.
+_LAMEL_PROMPT_TEMPLATE = """\
+You receive 4 images:
 
-IMAGE 2 — ORIGINAL: The room without any texture.
+IMAGE 1 — ORIGINAL: The unmodified room photo. This is immutable. \
+Everything outside the wall must look exactly like this image.
 
-IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material \
-showing the real colors and surface detail. The texture in the final \
-result must look EXACTLY like this photo — same colors, same grain, \
-same surface quality.
+IMAGE 2 — WALL MASK: White pixels = wall area where texture goes. \
+Black pixels = do NOT touch. This mask is absolute.
 
-YOUR JOB — this is a COPY operation, not a creative task:
+IMAGE 3 — GEOMETRY GUIDE: The original room with "{product_name}" \
+({material_type}) already placed on the wall at the correct scale, \
+spacing, and perspective. This is a LOCKED BLUEPRINT. \
+Each vertical slat is exactly {slat_width_cm}cm wide. \
+Gaps between slats are exactly {gap_cm}cm wide.{slat_count_info}
 
-1. Start with IMAGE 1 ("Bez AI") — this is your base image
-2. The texture in IMAGE 1 is ALREADY CORRECT — copy it EXACTLY as-is. \
-Every slat, every brick, every panel, every gap must be in the EXACT \
-same position, same size, same spacing, same pattern as in IMAGE 1. \
-Do NOT re-draw or re-interpret the texture in any way.
-3. The colors and surface detail must match IMAGE 3 (the swatch photo) \
-— identical hue, saturation, grain, relief
-4. From IMAGE 2 (original), copy back any objects that are IN FRONT of \
-the wall — furniture, TV, plants, lamps, frames, switches, people. \
-These objects must appear ON TOP of the texture.
-5. Where the texture goes beyond the wall (onto ceiling, floor, other \
-walls, baseboards, door frames) — show IMAGE 2 (original) instead.
-6. Apply subtle lighting from IMAGE 2 — very slight brightness \
-adjustment only, do NOT change the texture colors.
+IMAGE 4 — MATERIAL SWATCH: Close-up photo of the real "{product_name}" \
+material. This is your color, grain, and surface detail reference.
 
-SCALE VERIFICATION — check dimensions against reference points:
-Look at IMAGE 2 (original) and identify reference objects to verify scale:
-  • Door height ≈ 200cm
-  • Room/ceiling height ≈ 270cm
-  • Light switch height ≈ 115cm from floor
-  • Power outlet height ≈ 30cm from floor
-  • Standard door width ≈ 80-90cm
-  • Standard window sill height ≈ 90cm
-{dimensions_info}
-Use these reference points to verify that the texture elements in \
-IMAGE 1 are the correct real-world size. The texture in IMAGE 1 was \
-pre-calculated using these exact dimensions — trust it and copy it.
+YOUR TASK — this is material transfer, not creative generation:
 
-{gap_info}
+1. Start with IMAGE 1 (original room) as the base
+2. In the WHITE areas of IMAGE 2 (wall mask) ONLY, paint the wall \
+with the lamel material
+3. Follow IMAGE 3 (geometry guide) EXACTLY for the layout — \
+same slat count, same positions, same widths, same gaps, same perspective
+4. Use IMAGE 4 (swatch) for the material appearance — match the \
+wood grain direction, color tone, surface sheen
+5. Blend the texture naturally with the room lighting — subtle \
+brightness gradients matching ambient light direction, soft contact \
+shadows where furniture sits near the wall
+6. All foreground objects (furniture, TV, plants, lamps, frames, \
+switches, people) must remain fully visible in front of the textured wall
+7. Everything in the BLACK mask area must be identical to IMAGE 1
 
-CRITICAL — the texture pattern must be 100% IDENTICAL to IMAGE 1:
-  • Same number of elements (slats, bricks, panels)
-  • Same positions and spacing
-  • Same scale and proportions
-  • If IMAGE 1 shows 10 vertical slats, your output shows 10 vertical \
-slats in the EXACT same positions
+STRICT RULES:
+⛔ Do NOT add or remove slats — the count in IMAGE 3 is final
+⛔ Do NOT change slat spacing, width, or positions from IMAGE 3
+⛔ Do NOT edit anything in the BLACK mask area
+⛔ Do NOT crop, zoom, or resize the image
+⛔ Do NOT re-interpret or creatively re-draw the texture pattern
+⛔ Do NOT extend texture onto ceiling, floor, or other walls
 
-⛔ Do NOT re-draw, re-generate, or re-imagine the texture
-⛔ Do NOT change the number, spacing, or positions of elements
-⛔ Do NOT crop, zoom, or resize
-⛔ COPY the texture from IMAGE 1, that is ALL
-⛔ Texture MUST look like IMAGE 3 — same colors, same detail
+Output ONLY the image.
+"""
+
+_BRICK_PROMPT_TEMPLATE = """\
+You receive 4 images:
+
+IMAGE 1 — ORIGINAL: The unmodified room photo. This is immutable. \
+Everything outside the wall must look exactly like this image.
+
+IMAGE 2 — WALL MASK: White pixels = wall area where texture goes. \
+Black pixels = do NOT touch. This mask is absolute.
+
+IMAGE 3 — GEOMETRY GUIDE: The original room with "{product_name}" \
+({material_type}) already placed on the wall at the correct scale, \
+spacing, and perspective. This is a LOCKED BLUEPRINT. \
+Each brick/stone is {w_cm}cm × {h_cm}cm with {joint_cm}cm joints.
+
+IMAGE 4 — MATERIAL SWATCH: Close-up photo of the real "{product_name}" \
+material. This is your color, surface texture, and relief depth reference.
+
+YOUR TASK — this is material transfer, not creative generation:
+
+1. Start with IMAGE 1 (original room) as the base
+2. In the WHITE areas of IMAGE 2 (wall mask) ONLY, paint the wall \
+with the brick/stone material
+3. Follow IMAGE 3 (geometry guide) EXACTLY for the layout — \
+same brick course count, same positions, same joint thickness, same pattern
+4. Use IMAGE 4 (swatch) for the material appearance — match the \
+stone color, surface roughness, relief depth, mortar color
+5. Add natural depth within brick relief — subtle shadows on recessed \
+mortar joints, highlights on raised stone edges
+6. Blend with room lighting — brightness gradients matching ambient \
+light direction, contact shadows near furniture, ambient occlusion \
+at wall-ceiling and wall-floor junctions
+7. All foreground objects (furniture, TV, plants, lamps, frames, \
+switches, people) must remain fully visible in front of the textured wall
+8. Everything in the BLACK mask area must be identical to IMAGE 1
+
+STRICT RULES:
+⛔ Do NOT add or remove brick courses — the count in IMAGE 3 is final
+⛔ Do NOT change joint thickness or brick positions from IMAGE 3
+⛔ Do NOT edit anything in the BLACK mask area
+⛔ Do NOT crop, zoom, or resize the image
+⛔ Do NOT re-interpret or creatively re-draw the texture pattern
+⛔ Do NOT extend texture onto ceiling, floor, or other walls
 
 Output ONLY the image.
 """
@@ -740,72 +775,78 @@ def build_render_prompt(
     material_type: str,
     meta: dict,
 ) -> str:
-    """Build the full render prompt from product metadata.
+    """Build the render prompt from product metadata.
 
-    Public so the pipeline can access it for debug display.
+    Dispatches to lamel vs brick template based on layoutType.
     """
+    layout = meta.get("layoutType", "running-bond")
     joint_mm = float(meta.get("jointMm", 10))
     joint_cm = joint_mm / 10.0
-    if joint_cm >= 1.0:
-        gap_info = (
-            f"  • GAP: Each panel/slat must be separated by exactly "
-            f"{joint_cm:.1f}cm gaps. The dark space between elements is "
-            f"{joint_cm:.1f}cm wide — not wider, not narrower."
+
+    # Decide template
+    is_lamel = (
+        layout == "vertical-stack"
+        or "lamel" in material_type.lower()
+        or "panel" in material_type.lower()
+        or "slat" in layout.lower()
+    )
+
+    if is_lamel:
+        module_w_mm = float(meta.get("moduleWidthMm", 30))
+        slat_width_cm = module_w_mm / 10.0
+        gap_cm = joint_cm
+
+        # Compute expected slat count info (informational only)
+        slat_count_info = ""
+        if slat_width_cm > 0 and gap_cm > 0:
+            repeat_cm = slat_width_cm + gap_cm
+            slat_count_info = (
+                f"\nOne slat+gap repeat = {repeat_cm:.1f}cm. "
+                f"Do NOT estimate count — use IMAGE 3 exactly."
+            )
+
+        return _LAMEL_PROMPT_TEMPLATE.format(
+            product_name=str(product_name or "product"),
+            material_type=str(material_type),
+            slat_width_cm=f"{slat_width_cm:.1f}",
+            gap_cm=f"{gap_cm:.1f}",
+            slat_count_info=slat_count_info,
         )
     else:
-        gap_info = ""
+        module_w_mm = float(meta.get("moduleWidthMm", 250))
+        module_h_mm = float(meta.get("moduleHeightMm", 65))
+        w_cm = module_w_mm / 10.0
+        h_cm = module_h_mm / 10.0
 
-    module_h_mm = float(meta.get("moduleHeightMm", 65))
-    module_w_mm = float(meta.get("moduleWidthMm", 250))
-    module_h_cm = module_h_mm / 10.0
-    module_w_cm = module_w_mm / 10.0
-    layout = meta.get("layoutType", "running-bond")
-
-    dim_lines = [f"The product \"{product_name}\" has these real dimensions:"]
-    if "lamel" in material_type.lower() or "panel" in material_type.lower() or "slat" in layout.lower() or layout == "vertical-stack":
-        dim_lines.append(f"  • Each slat/panel is {module_w_cm:.1f}cm wide and {module_h_cm:.1f}cm tall")
-        if joint_cm >= 1.0:
-            dim_lines.append(f"  • Gap between slats: {joint_cm:.1f}cm")
-        bricks_in_door = int(200 / module_w_cm) if module_w_cm > 0 else 0
-        dim_lines.append(f"  • ~{bricks_in_door} slats would fit across a 200cm door width")
-    else:
-        dim_lines.append(f"  • Each brick/module is {module_w_cm:.1f}cm wide × {module_h_cm:.1f}cm tall")
-        if joint_cm > 0:
-            dim_lines.append(f"  • Joint/mortar gap: {joint_cm:.1f}cm")
-        b_door = int(200 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
-        dim_lines.append(f"  • ~{b_door} bricks should fit vertically in a 200cm door height")
-        b_room = int(270 / (module_h_cm + joint_cm)) if (module_h_cm + joint_cm) > 0 else 0
-        dim_lines.append(f"  • ~{b_room} bricks should fit vertically in a 270cm room height")
-
-    dimensions_info = "\n".join(dim_lines)
-
-    return _RENDER_PROMPT_TEMPLATE.format(
-        product_name=str(product_name or "product"),
-        material_type=str(material_type),
-        gap_info=gap_info,
-        dimensions_info=dimensions_info,
-    )
+        return _BRICK_PROMPT_TEMPLATE.format(
+            product_name=str(product_name or "product"),
+            material_type=str(material_type),
+            w_cm=f"{w_cm:.1f}",
+            h_cm=f"{h_cm:.1f}",
+            joint_cm=f"{joint_cm:.1f}",
+        )
 
 
 def generate_photorealistic_render(
     original: Image.Image,
-    composite: Image.Image,
-    mask_overlay: Image.Image | None = None,
+    wall_mask_image: Image.Image,
+    geometry_guide: Image.Image,
     product_name: str = "product",
     product_texture: Image.Image | None = None,
-    analysis: dict | None = None,
     material_type: str = "decorative stone/brick",
     product_meta: dict | None = None,
 ) -> Image.Image | None:
-    """Generate photorealistic render from 3 images.
+    """Generate photorealistic render from 4 images.
 
-    Sends 3 images to Gemini (in this order):
-      1. COMPOSITE ("Bez AI") — texture provisionally laid on the wall
-      2. ORIGINAL — unmodified room photo (ground truth)
-      3. PRODUCT TEXTURE — close-up tile/swatch of the selected product
+    Sends 4 images to Gemini (in this order):
+      1. ORIGINAL — unmodified room photo (immutable scene)
+      2. WALL MASK — white-on-black mask (editable area)
+      3. GEOMETRY GUIDE — deterministic texture blueprint on the wall
+      4. PRODUCT SWATCH — close-up of the material (appearance reference)
 
-    The AI analyzes all 3 images and produces a photorealistic blend.
-    No mask needed — the AI sees the difference between composite and original.
+    The AI only fills the white mask area with realistic material,
+    following the geometry guide as an exact blueprint.
+    Single-turn, fresh context — no multi-turn drift.
     """
     from google.genai import types
 
@@ -815,11 +856,12 @@ def generate_photorealistic_render(
     meta = product_meta or {}
     prompt = build_render_prompt(product_name, material_type, meta)
 
-    # Send 3 images: composite ("bez ai"), original, product texture
+    # Send 4 images in order: original, mask, guide, swatch
     parts: list = [
         types.Part.from_text(text=prompt),
-        types.Part.from_bytes(data=_pil_to_bytes(composite), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(original), mime_type="image/jpeg"),
+        types.Part.from_bytes(data=_pil_to_bytes(wall_mask_image), mime_type="image/png"),
+        types.Part.from_bytes(data=_pil_to_bytes(geometry_guide), mime_type="image/jpeg"),
     ]
     if product_texture:
         parts.append(
@@ -834,7 +876,7 @@ def generate_photorealistic_render(
             client, model=model_name, contents=parts,
             config=types.GenerateContentConfig(
                 response_modalities=["IMAGE", "TEXT"],
-                temperature=0.05,
+                temperature=0.2,
             ),
         )
     except Exception as exc:
