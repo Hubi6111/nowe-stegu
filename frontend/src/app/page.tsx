@@ -59,7 +59,6 @@ interface PipelineStage {
 const INITIAL_STAGES: PipelineStage[] = [
   { id: "decode", label: "Dekodowanie obrazu", status: "pending" },
   { id: "texture", label: "Projekcja tekstury", status: "pending" },
-  { id: "render", label: "Render AI — analiza + kompozycja", status: "pending" },
 ];
 
 function StageIcon({ status }: { status: PipelineStage["status"] }) {
@@ -439,16 +438,6 @@ export default function Home() {
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(INITIAL_STAGES);
   const [debugOpen, setDebugOpen] = useState(false);
-  // ── DEBUG STATE (removable) ──
-  const [debugData, setDebugData] = useState<{
-    prompt?: string;
-    images?: Record<string, string>;
-    model?: string;
-    temperature?: number;
-    product_meta?: Record<string, unknown>;
-    prompt_type?: string;
-  } | null>(null);
-  // ── END DEBUG STATE ──
 
   const fetchRemaining = useCallback(() => {
     fetch(`${API_BASE}/api/remaining-generations`)
@@ -621,21 +610,6 @@ export default function Home() {
 
           // Handle mask_refine (not in the main list)
           if (stageId === "mask_refine") continue;
-
-          // ── DEBUG: Capture debug event (removable) ──
-          if (stageId === "debug") {
-            setDebugData({
-              prompt: evt.prompt as string | undefined,
-              images: evt.images as Record<string, string> | undefined,
-              model: evt.model as string | undefined,
-              temperature: evt.temperature as number | undefined,
-              product_meta: evt.product_meta as Record<string, unknown> | undefined,
-              prompt_type: evt.prompt_type as string | undefined,
-            });
-            setDebugOpen(true);
-            continue;
-          }
-          // ── END DEBUG CAPTURE ──
 
           // Save analysis data if present
           if (evt.analysis) {
@@ -955,83 +929,6 @@ export default function Home() {
                         {debugOpen && (
                           <div className="border-t border-stone-100 py-2">
                             <PipelineStatusPanel stages={pipelineStages} />
-
-                            {/* ── DEBUG PANEL (removable section) ── */}
-                            {debugData && (
-                              <div className="mx-2 mt-3 rounded-xl bg-[#1a1a2e] text-white overflow-hidden shadow-lg">
-                                <div className="px-4 py-3 bg-[#16213e] border-b border-[#0f3460] flex items-center justify-between">
-                                  <span className="text-xs font-bold tracking-wider uppercase text-[#e94560]">
-                                    🔍 Gemini Debug Panel
-                                  </span>
-                                  <span className="text-[10px] text-stone-400">
-                                    {debugData.model} · temp: {debugData.temperature}
-                                    {debugData.prompt_type && (
-                                      <span className="ml-2 px-1.5 py-0.5 text-[8px] font-bold bg-[#0f3460] text-[#e94560] rounded">
-                                        {debugData.prompt_type.toUpperCase()}
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-
-                                {/* Images sent to Gemini */}
-                                {debugData.images && (
-                                  <div className="px-4 py-3 border-b border-[#0f3460]">
-                                    <p className="text-[10px] font-bold text-[#e94560] mb-2 uppercase tracking-wider">Obrazy wysłane do Gemini (4-image pipeline)</p>
-                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                                      {Object.entries(debugData.images).map(([key, b64]) => {
-                                        const mime = key === 'wall_mask' ? 'image/png' : 'image/jpeg';
-                                        const labels: Record<string, string> = {
-                                          original: 'IMAGE 1 — Oryginał',
-                                          wall_mask: 'IMAGE 2 — Maska ściany',
-                                          geometry_guide: 'IMAGE 3 — Geometria',
-                                          texture_swatch: 'IMAGE 4 — Tekstura',
-                                        };
-                                        return (
-                                          <div key={key} className="flex flex-col items-center gap-1">
-                                            <div className="rounded-lg overflow-hidden border border-[#0f3460] bg-black">
-                                              <img
-                                                src={`data:${mime};base64,${b64}`}
-                                                alt={key}
-                                                className="w-full h-auto max-h-32 object-contain"
-                                              />
-                                            </div>
-                                            <span className="text-[9px] text-stone-400 text-center">
-                                              {labels[key] || key}
-                                            </span>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Product metadata */}
-                                {debugData.product_meta && (
-                                  <div className="px-4 py-3 border-b border-[#0f3460]">
-                                    <p className="text-[10px] font-bold text-[#e94560] mb-2 uppercase tracking-wider">Metadane produktu</p>
-                                    <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-                                      {Object.entries(debugData.product_meta).map(([k, v]) => (
-                                        <div key={k} className="flex justify-between text-[10px]">
-                                          <span className="text-stone-400">{k}</span>
-                                          <span className="text-stone-200 font-mono">{String(v)}</span>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Full prompt */}
-                                {debugData.prompt && (
-                                  <div className="px-4 py-3">
-                                    <p className="text-[10px] font-bold text-[#e94560] mb-2 uppercase tracking-wider">Pełny prompt wysłany do Gemini</p>
-                                    <pre className="text-[10px] text-stone-300 whitespace-pre-wrap font-mono leading-relaxed max-h-[400px] overflow-y-auto bg-[#0d1117] rounded-lg p-3 border border-[#0f3460]">
-                                      {debugData.prompt}
-                                    </pre>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {/* ── END DEBUG PANEL ── */}
                           </div>
                         )}
                       </div>

@@ -1,4 +1,4 @@
-"""Pipeline — wall mask detection (user polygon + Gemini) and texture render."""
+"""Pipeline — wall mask detection (user polygon) and deterministic texture projection."""
 
 import base64
 import io
@@ -16,27 +16,16 @@ from pydantic import BaseModel
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from services.gemini import (
-    analyze_wall_scene,
-    generate_photorealistic_render,
-    build_render_prompt,
-    verify_and_correct_render,
-    image_model_name,
-    refine_image,
-    image_to_b64,
-)
 from services.texture import (
     polygon_to_mask,
     exclusions_to_mask,
     compute_final_mask,
-    refine_mask_with_boundaries,
     render_mask_overlay,
     project_texture,
-    generate_geometry_guide,
-    generate_wall_mask_image,
     masked_composite,
     mask_to_b64,
     decode_mask_b64,
+    image_to_b64,
 )
 from services.admin_store import (
     check_rate_limit,
@@ -129,13 +118,6 @@ class RenderFinalRequest(BaseModel):
     canvas_height: float
 
 
-class RenderRefineRequest(BaseModel):
-    composite: str
-    mask: str | None = None
-    original_image: str | None = None
-    product_name: str
-
-
 class WallDetectRequest(BaseModel):
     image: str
     polygon: list[PointSchema]
@@ -184,8 +166,7 @@ def _build_polygon_mask(
     poly_mask: np.ndarray,
     excl_mask: np.ndarray,
 ) -> dict:
-    """Build wall mask directly from user polygon (no AI — Gemini handles
-    scene analysis during the final render step instead)."""
+    """Build wall mask directly from user polygon."""
     final_mask = compute_final_mask(
         poly_mask,
         None,
@@ -201,6 +182,8 @@ def _build_polygon_mask(
         "overlay": overlay,
     }
 
+
+# ── Public endpoints ──────────────────────────────────────────────────────────
 
 @router.get("/api/remaining-generations")
 async def remaining_generations(request: Request):
@@ -254,175 +237,48 @@ async def detect_mask(req: DetectMaskRequest):
 
 @router.post("/api/render-final")
 async def render_final(req: RenderFinalRequest, request: Request):
-    """Texture on confirmed mask + Gemini photorealistic pass."""
+    """Deterministic texture projection on confirmed mask."""
     client_ip = _get_client_ip(request)
     allowed, used, limit = check_rate_limit(client_ip)
     if not allowed:
         raise HTTPException(
             429,
-            detail=f"Dzienny limit generacji ({limit}) został osiągnięty. Spróbuj jutro.",
+            detail=f"Limit {limit} generacji/dzień wyczerpany ({used}/{limit})."
         )
 
     t0 = time.time()
     results: dict = {"timings": {}}
 
-    try:
-        canvas_w = max(int(req.canvas_width), 1)
-        canvas_h = max(int(req.canvas_height), 1)
-        image = decode_image(req.image)
-        sx = image.width / canvas_w
-        sy = image.height / canvas_h
-        scaled_polygon = [{"x": p.x * sx, "y": p.y * sy} for p in req.polygon]
+    image = decode_image(req.image)
+    canvas_w = max(int(req.canvas_width), 1)
+    canvas_h = max(int(req.canvas_height), 1)
+    sx = image.width / canvas_w
+    sy = image.height / canvas_h
+    scaled_polygon = [{"x": p.x * sx, "y": p.y * sy} for p in req.polygon]
 
-        if req.confirmed_mask:
-            final_mask = decode_mask_b64(req.confirmed_mask, image.width, image.height)
-        else:
-            final_mask = polygon_to_mask(scaled_polygon, image.width, image.height)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("render_final decode failed: %s", exc, exc_info=True)
-        raise HTTPException(422, detail=f"Could not decode inputs: {exc}")
+    if req.confirmed_mask:
+        final_mask = decode_mask_b64(req.confirmed_mask, image.width, image.height)
+    else:
+        final_mask = polygon_to_mask(scaled_polygon, image.width, image.height)
 
-    # ── Deterministic texture projection (heuristic scale — for analysis) ─
+    meta, texture = load_product(req.product_id)
+    product_name = meta.get("name", req.product_id)
+
+    # Deterministic texture projection
     t1 = time.time()
-    try:
-        meta, texture = load_product(req.product_id)
-        composite = project_texture(
-            image, final_mask, texture, meta=meta, polygon=scaled_polygon
-        )
-        results["composite"] = image_to_b64(composite)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.error("Texture projection failed: %s", exc, exc_info=True)
-        raise HTTPException(500, detail=f"Texture projection failed: {exc}")
+    composite = project_texture(
+        image, final_mask, texture, meta=meta, polygon=scaled_polygon
+    )
+    composite_b64 = image_to_b64(composite)
+    results["composite"] = composite_b64
     results["timings"]["texture_project"] = round(time.time() - t1, 2)
 
-    mask_overlay = render_mask_overlay(
-        image, final_mask, alpha=0.55, max_long_side=2048
-    )
-
-    # ── Stage 1: Gemini scene analysis (measurement + occlusion + lighting) ─
-    t2 = time.time()
-    if os.environ.get("GEMINI_API_KEY"):
-        try:
-            product_name = meta.get("name", req.product_id)
-            material_type = meta.get("materialType", meta.get("layoutType", "decorative stone/brick"))
-
-            analysis: dict = {}
-            try:
-                analysis = analyze_wall_scene(image, composite, mask_overlay)
-                results["timings"]["scene_analysis"] = round(time.time() - t2, 2)
-                results["analysis"] = {
-                    "wallHeightCm": analysis.get("wallHeightCm"),
-                    "wallWidthCm": analysis.get("wallWidthCm"),
-                    "referenceObjects": [
-                        r.get("name") for r in analysis.get("referenceObjects", [])
-                    ],
-                    "occluders": [
-                        o.get("label") for o in analysis.get("occluders", [])
-                    ],
-                    "confidence": analysis.get("confidence"),
-                }
-            except Exception as exc_a:
-                logger.warning("Gemini analysis failed (non-fatal): %s", exc_a)
-
-            # ── Refine mask with wall boundaries from analysis ────────────
-            wall_boundaries = analysis.get("wallBoundaries")
-            if wall_boundaries:
-                refined = refine_mask_with_boundaries(final_mask, wall_boundaries)
-                if refined.any() and not np.array_equal(refined, final_mask):
-                    logger.info(
-                        "Mask refined by wall boundaries — trimmed %d px",
-                        int(final_mask.sum() - refined.sum()),
-                    )
-                    final_mask = refined
-
-            # ── Re-tile with AI-calibrated dimensions ─────────────────────
-            t_retile = time.time()
-            try:
-                composite = project_texture(
-                    image, final_mask, texture, meta=meta,
-                    polygon=scaled_polygon, analysis=analysis,
-                )
-                results["composite"] = image_to_b64(composite)
-                mask_overlay = render_mask_overlay(
-                    image, final_mask, alpha=0.55, max_long_side=2048
-                )
-            except Exception as exc_rt:
-                logger.warning("Re-tile after analysis failed (non-fatal): %s", exc_rt)
-            results["timings"]["retile"] = round(time.time() - t_retile, 2)
-
-            # ── Stage 2: Photorealistic render ────────────────────────────
-            t3 = time.time()
-            # Generate geometry guide + wall mask for 4-image pipeline
-            guide = generate_geometry_guide(
-                image, final_mask, texture, meta=meta,
-                polygon=scaled_polygon, analysis=analysis,
-            )
-            wall_mask_img = generate_wall_mask_image(
-                final_mask, target_size=(image.width, image.height)
-            )
-            raw_rendered = generate_photorealistic_render(
-                original=image,
-                wall_mask_image=wall_mask_img,
-                geometry_guide=guide,
-                product_name=product_name,
-                product_texture=texture,
-                material_type=material_type,
-                product_meta=meta,
-            )
-            results["timings"]["render"] = round(time.time() - t3, 2)
-
-            if raw_rendered:
-                # Safety: clip to mask so areas outside the polygon are preserved
-                stage2_output = masked_composite(
-                    image, raw_rendered, final_mask, feather_radius=3
-                )
-
-                # ── Stage 3: Verification & correction ────────────────────
-                t4 = time.time()
-                skip_verify = os.environ.get("SKIP_VERIFICATION", "").lower() in ("1", "true")
-                if not skip_verify:
-                    try:
-                        verified = verify_and_correct_render(
-                            original=image,
-                            rendered=stage2_output,
-                            mask_overlay=mask_overlay,
-                            product_texture=texture,
-                        )
-                        if verified:
-                            final_output = masked_composite(
-                                image, verified, final_mask, feather_radius=3
-                            )
-                        else:
-                            final_output = stage2_output
-                    except Exception as exc_v:
-                        logger.warning("Verification pass failed (non-fatal): %s", exc_v)
-                        final_output = stage2_output
-                else:
-                    final_output = stage2_output
-                results["timings"]["verification"] = round(time.time() - t4, 2)
-
-                results["refined"] = image_to_b64(final_output)
-                results["gemini_model"] = image_model_name()
-            else:
-                results["refined"] = results["composite"]
-                results["gemini_model"] = "no-image-output"
-        except Exception as exc:
-            logger.error("Gemini render failed: %s", exc)
-            results["refined"] = results["composite"]
-            results["gemini_model"] = f"error: {exc}"
-    else:
-        results["refined"] = results["composite"]
-        results["gemini_model"] = "not-configured"
-    results["timings"]["gemini_total"] = round(time.time() - t2, 2)
+    # Use composite as final result (no AI)
+    results["refined"] = composite_b64
 
     # ── Watermark ─────────────────────────────────────────────────────────
     if results.get("refined"):
         try:
-            from services.gemini import image_to_b64 as _b64
             refined_str = results["refined"]
             raw_b = refined_str.split(",", 1)[-1] if "," in refined_str else refined_str
             refined_img = Image.open(io.BytesIO(base64.b64decode(raw_b))).convert("RGB")
@@ -433,7 +289,6 @@ async def render_final(req: RenderFinalRequest, request: Request):
             logger.warning("Watermark failed (non-fatal): %s", wm_exc)
 
     increment_usage(client_ip)
-
     results["timings"]["total"] = round(time.time() - t0, 2)
     results["image_width"] = image.width
     results["image_height"] = image.height
@@ -453,8 +308,8 @@ async def render_final(req: RenderFinalRequest, request: Request):
         save_generation(
             client_ip=client_ip,
             product_id=req.product_id,
-            product_name=meta.get("name", req.product_id),
-            gemini_model=results.get("gemini_model", "unknown"),
+            product_name=product_name,
+            gemini_model="deterministic",
             timings=results.get("timings", {}),
             refined_b64=results.get("refined"),
             thumbnail_b64=thumbnail_b64,
@@ -465,24 +320,25 @@ async def render_final(req: RenderFinalRequest, request: Request):
     return results
 
 
+# ── SSE Streaming endpoint ────────────────────────────────────────────────────
+
 def _sse(data: dict) -> str:
-    """Format a dict as a Server-Sent Events data line."""
     return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 @router.post("/api/render-stream")
 async def render_stream(req: RenderFinalRequest, request: Request):
-    """Simplified 3-stage pipeline: DECODE → TEXTURE → AI RENDER.
-
-    The AI render handles everything in one pass: scale verification,
-    foreground masking, lighting integration, boundary trimming.
-    """
+    """SSE streaming pipeline — decode → texture → done."""
     client_ip = _get_client_ip(request)
     allowed, used, limit = check_rate_limit(client_ip)
     if not allowed:
-        raise HTTPException(
-            429,
-            detail=f"Dzienny limit generacji ({limit}) został osiągnięty. Spróbuj jutro.",
+        error_payload = json.dumps({
+            "stage": "done", "ok": False,
+            "error": f"Limit {limit} generacji/dzień wyczerpany ({used}/{limit})."
+        })
+        return StreamingResponse(
+            iter([f"data: {error_payload}\n\n"]),
+            media_type="text/event-stream",
         )
 
     def _pipeline():
@@ -491,14 +347,15 @@ async def render_stream(req: RenderFinalRequest, request: Request):
 
         # ── Stage 1: Decode inputs ────────────────────────────────────────
         yield _sse({"stage": "decode", "status": "running",
-                     "message": "Dekodowanie obrazu…"})
+                     "message": "Dekodowanie obrazu i maski…"})
         try:
+            image = decode_image(req.image)
             canvas_w = max(int(req.canvas_width), 1)
             canvas_h = max(int(req.canvas_height), 1)
-            image = decode_image(req.image)
             sx = image.width / canvas_w
             sy = image.height / canvas_h
             scaled_polygon = [{"x": p.x * sx, "y": p.y * sy} for p in req.polygon]
+
             if req.confirmed_mask:
                 final_mask = decode_mask_b64(req.confirmed_mask, image.width, image.height)
             else:
@@ -512,27 +369,16 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             yield _sse({"stage": "done", "ok": False, "error": str(exc)})
             return
 
-        # ── Stage 2: Deterministic geometry + texture projection ───────────
+        # ── Stage 2: Deterministic texture projection ─────────────────────
         t1 = time.time()
         yield _sse({"stage": "texture", "status": "running",
                      "message": "Projekcja tekstury na ścianę…"})
         try:
             meta, texture = load_product(req.product_id)
-            # Composite ("Bez AI") — full blend for preview / fallback
             composite = project_texture(
                 image, final_mask, texture, meta=meta, polygon=scaled_polygon
             )
             composite_b64 = image_to_b64(composite)
-
-            # Geometry guide — clean texture layout, no lighting effects
-            geometry_guide = generate_geometry_guide(
-                image, final_mask, texture, meta=meta, polygon=scaled_polygon
-            )
-
-            # Wall mask image — white-on-black for AI
-            wall_mask_img = generate_wall_mask_image(
-                final_mask, target_size=(image.width, image.height)
-            )
 
             td = round(time.time() - t1, 2)
             timings["texture"] = td
@@ -543,109 +389,11 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             yield _sse({"stage": "done", "ok": False, "error": str(exc)})
             return
 
-        # No Gemini key — return composite as-is
-        if not os.environ.get("GEMINI_API_KEY"):
-            yield _sse({"stage": "render", "status": "skipped",
-                         "message": "Brak klucza GEMINI_API_KEY"})
-            timings["total"] = round(time.time() - t0, 2)
-            yield _sse({"stage": "done", "ok": True,
-                "result": {"composite": composite_b64, "refined": composite_b64,
-                           "gemini_model": "not-configured", "timings": timings}})
-            return
-
-        product_name = meta.get("name", req.product_id)
-        material_type = meta.get(
-            "materialType", meta.get("layoutType", "decorative stone/brick")
-        )
-
-        # ── DEBUG: Send prompt + images to frontend ── (removable section)
-        try:
-            debug_prompt = build_render_prompt(product_name, material_type, meta)
-            # Build small thumbnails for debug display
-            def _thumb_b64(img: Image.Image, max_side: int = 400) -> str:
-                w, h = img.size
-                ratio = min(max_side / w, max_side / h)
-                thumb = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
-                buf = io.BytesIO()
-                thumb.save(buf, format="JPEG", quality=70)
-                return base64.b64encode(buf.getvalue()).decode()
-
-            def _thumb_b64_png(img: Image.Image, max_side: int = 400) -> str:
-                if img.mode != "L":
-                    img = img.convert("L")
-                w, h = img.size
-                ratio = min(max_side / w, max_side / h)
-                thumb = img.resize((int(w * ratio), int(h * ratio)), Image.NEAREST)
-                buf = io.BytesIO()
-                thumb.save(buf, format="PNG")
-                return base64.b64encode(buf.getvalue()).decode()
-
-            debug_images = {
-                "original": _thumb_b64(image),
-                "wall_mask": _thumb_b64_png(wall_mask_img),
-                "geometry_guide": _thumb_b64(geometry_guide),
-            }
-            if texture:
-                debug_images["texture_swatch"] = _thumb_b64(texture)
-
-            yield _sse({
-                "stage": "debug",
-                "prompt": debug_prompt,
-                "images": debug_images,
-                "model": image_model_name(),
-                "temperature": 0.2,
-                "prompt_type": "lamel" if meta.get("layoutType") == "vertical-stack" or "lamel" in material_type.lower() else "brick",
-                "product_meta": {
-                    k: meta.get(k)
-                    for k in ["name", "materialType", "layoutType",
-                              "moduleHeightMm", "moduleWidthMm", "jointMm",
-                              "textureScaleMultiplier"]
-                    if meta.get(k) is not None
-                },
-            })
-        except Exception:
-            pass  # debug is non-critical
-        # ── END DEBUG SECTION ──
-
-        # ── Stage 3: AI Render (4 images: original, mask, guide, swatch) ──
-        t2 = time.time()
-        yield _sse({"stage": "render", "status": "running",
-                     "message": "Renderowanie AI — analiza sceny, kompozycja, oświetlenie (Gemini)…"})
-        raw_rendered = None
-        try:
-            raw_rendered = generate_photorealistic_render(
-                original=image,
-                wall_mask_image=wall_mask_img,
-                geometry_guide=geometry_guide,
-                product_name=product_name,
-                product_texture=texture,
-                material_type=material_type,
-                product_meta=meta,
-            )
-            td = round(time.time() - t2, 2)
-            timings["render"] = td
-            if raw_rendered:
-                yield _sse({"stage": "render", "status": "done", "timing": td,
-                             "detail": f"model: {image_model_name()}"})
-            else:
-                yield _sse({"stage": "render", "status": "warning", "timing": td,
-                             "error": "Gemini nie zwrócił obrazu"})
-        except Exception as exc:
-            td = round(time.time() - t2, 2)
-            timings["render"] = td
-            yield _sse({"stage": "render", "status": "error",
-                         "error": str(exc), "timing": td})
-
-        # Build final output — safety composite to enforce wall boundary
-        if raw_rendered:
-            final_output = masked_composite(
-                image, raw_rendered, final_mask, feather_radius=3
-            )
-        else:
-            final_output = composite
+        # ── Final output ──────────────────────────────────────────────────
+        final_output = composite
+        refined_b64 = image_to_b64(final_output)
 
         # ── Watermark ─────────────────────────────────────────────────────
-        refined_b64 = image_to_b64(final_output)
         try:
             watermarked = _apply_watermark(final_output)
             if watermarked is not final_output:
@@ -669,7 +417,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 client_ip=client_ip,
                 product_id=req.product_id,
                 product_name=meta.get("name", req.product_id),
-                gemini_model=image_model_name(),
+                gemini_model="deterministic",
                 timings=timings,
                 refined_b64=refined_b64,
                 thumbnail_b64=thumbnail_b64,
@@ -682,10 +430,8 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             "result": {
                 "composite": composite_b64,
                 "refined": refined_b64,
-                "gemini_model": image_model_name(),
+                "gemini_model": "deterministic",
                 "timings": timings,
-                "image_width": image.width,
-                "image_height": image.height,
             }})
 
     return StreamingResponse(
@@ -697,6 +443,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             "Connection": "keep-alive",
         },
     )
+
 
 @router.post("/api/wall-detect")
 async def wall_detect(req: WallDetectRequest):
@@ -728,28 +475,6 @@ async def texture_project(req: TextureProjectRequest):
     return {"composite": image_to_b64(composite)}
 
 
-@router.post("/api/render-refine")
-async def render_refine(req: RenderRefineRequest):
-    if not os.environ.get("GEMINI_API_KEY"):
-        raise HTTPException(501, detail="GEMINI_API_KEY not configured.")
-    composite = decode_image(req.composite)
-    try:
-        raw_refined = refine_image(composite, req.product_name)
-    except Exception as exc:
-        raise HTTPException(502, detail=str(exc))
-    if raw_refined is None:
-        raise HTTPException(502, detail="Gemini returned no image")
-    if req.mask and req.original_image:
-        original = decode_image(req.original_image)
-        mask = decode_mask_b64(req.mask, original.width, original.height)
-        final = masked_composite(original, raw_refined, mask, feather_radius=3)
-    else:
-        if raw_refined.size != composite.size:
-            raw_refined = raw_refined.resize(composite.size, Image.LANCZOS)
-        final = raw_refined
-    return {"refined": image_to_b64(final)}
-
-
 @router.post("/api/generate-visualization")
 async def generate_visualization(req: GenerateRequest):
     detect_req = DetectMaskRequest(
@@ -769,7 +494,13 @@ async def generate_visualization(req: GenerateRequest):
         canvas_width=req.canvas_width,
         canvas_height=req.canvas_height,
     )
-    render_result = await render_final(render_req)
+    # We need a mock request for render_final
+    from starlette.testclient import TestClient
+    from unittest.mock import MagicMock
+    mock_request = MagicMock()
+    mock_request.client.host = "internal"
+    mock_request.headers = {}
+    render_result = await render_final(render_req, mock_request)
 
     return {
         **mask_result,
