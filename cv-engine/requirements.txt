@@ -1,0 +1,42 @@
+# CV Engine requirements — Python 3.11, Apple MPS
+# Use conda env: cv-engine
+
+# Core ML
+torch>=2.5.1
+torchvision>=0.20.1
+numpy>=1.24.0
+pillow>=10.0.0
+opencv-python>=4.7.0
+scipy>=1.10.0
+
+# Web server
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.9
+pydantic>=2.0.0
+httpx>=0.27.0
+python-dotenv>=1.0.0
+
+# SAM2 (installed from vendor/sam2 via pip install -e .)
+hydra-core>=1.3.2
+iopath>=0.1.10
+tqdm>=4.66.1
+
+# GroundingDINO (loaded via sys.path from vendor/)
+transformers>=4.40.0
+addict
+timm
+supervision>=0.22.0
+pycocotools
+yapf
+
+# mmsegmentation
+mmengine
+mmcv-lite>=2.0.0
+mmsegmentation
+
+# Depth-Anything-V2 (loaded via sys.path from vendor/)
+# No additional deps beyond torch/torchvision
+
+# Wall Prior (SegFormer via HuggingFace)
+# Already covered by transformers

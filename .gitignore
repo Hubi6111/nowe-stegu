@@ -4,6 +4,9 @@
 # Python
 api/.venv/
 inference/.venv/
+cv-engine/.venv/
+cv-engine/vendor/
+models/
 __pycache__/
 *.pyc
 
