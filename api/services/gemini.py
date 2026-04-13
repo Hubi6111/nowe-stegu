@@ -673,153 +673,76 @@ def _build_dimension_instructions(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RENDER_PROMPT_TEMPLATE = """\
-You are a photo compositing tool. You receive 4 images and produce \
-one photorealistic result.
+You are a professional photo compositor. You receive 3 images:
 
-IMAGE 1 — ORIGINAL: The unmodified room photograph (ground truth).
-IMAGE 2 — COMPOSITE: The same photo with "{product_name}" ({material_type}) \
-texture already mapped onto the wall. The texture placement is pre-computed.
-IMAGE 3 — MASK: Shows the wall area with an ORANGE overlay.
-IMAGE 4 — PRODUCT TEXTURE: A close-up tile/swatch of the selected product. \
-This is your COLOR and DETAIL reference.
+IMAGE 1 — "BEZ AI" (COMPOSITE): The original room photo with "{product_name}" \
+({material_type}) texture provisionally laid onto one wall. This shows WHERE \
+and at WHAT SCALE the texture should appear, but the integration is rough — \
+it needs to be made photorealistic.
 
-STEP 1: ANALYZE THE WHOLE SCENE
-Before editing, look at the ENTIRE IMAGE 1 to understand the room:
-  • Find reference objects: doors (~200cm), windows, light switches (~115cm), \
-power outlets (~30cm), furniture, people — use them to understand scale
-  • Note the lighting direction, color temperature, and shadows
-  • Identify ALL objects in front of the wall (furniture, TV, plants, etc.)
-  • Determine where the wall surface ends (ceiling junction, floor/baseboard, \
-corners, door/window frames)
+IMAGE 2 — ORIGINAL: The unmodified room photograph. This is your reference \
+for everything: lighting, shadows, color temperature, all objects and \
+surfaces that are NOT the new texture.
 
-STEP 2: PRODUCE THE FINAL IMAGE
-Start from IMAGE 2 (COMPOSITE) and apply these corrections:
+IMAGE 3 — PRODUCT TEXTURE: A close-up tile/swatch of the "{product_name}" \
+material. This is your reference for the exact colors, grain, surface \
+detail, and look of the texture.
 
-1. RESTORE FOREGROUND OBJECTS — Copy pixel-for-pixel from IMAGE 1 any \
-object that is IN FRONT of the wall. The texture goes BEHIND them.
-{occluder_list}
+YOUR TASK: Create a single photorealistic photograph that looks like the \
+texture was physically installed on the wall. Study all 3 images carefully:
 
-2. TRIM WALL BOUNDARIES — If texture extends beyond the wall onto ceiling, \
-floor, adjacent walls, baseboards, or door frames — replace with ORIGINAL.
+STEP 1 — ANALYZE THE SCENE (look at IMAGE 2):
+  • Identify the lighting: direction, intensity, color temperature, shadows
+  • Find all objects IN FRONT of the wall: furniture, TV, shelves, plants, \
+lamps, frames, switches, cables, curtains, people
+  • Note where the wall ends: ceiling junction, floor/baseboard, corners, \
+door/window frames
 
-3. MATCH LIGHTING — Very subtly adjust texture brightness to match IMAGE 1. \
-Keep the same gradient direction and color temperature. This should be \
-barely noticeable — preserve the texture colors from IMAGE 4.
+STEP 2 — BLEND THE TEXTURE:
+  • Take the texture placement from IMAGE 1 (position, scale, tiling)
+  • Make it look REAL: match the room's lighting from IMAGE 2
+  • Apply subtle shadows where furniture touches or is near the wall
+  • Add natural ambient occlusion at ceiling/floor/corner junctions
+  • The texture colors must match IMAGE 3 (product texture) but with \
+the room's lighting applied naturally
 
-4. VERIFY SCALE — Check that the texture elements in the COMPOSITE look \
-physically correct relative to the reference objects you identified. \
-The texture scale in the COMPOSITE is pre-computed from real millimetre \
-dimensions, so it should be correct — trust it. If it looks right, \
-keep it exactly as-is.
+STEP 3 — RESTORE THE SCENE:
+  • Every object that is IN FRONT of the wall in IMAGE 2 must appear \
+ON TOP of the texture — copy them from IMAGE 2 pixel-perfectly
+  • The texture must NOT cover: ceiling, floor, adjacent walls, baseboards, \
+crown molding, door/window frames
+  • Everything outside the textured wall area must be IDENTICAL to IMAGE 2
 
-CRITICAL: Output must be 95% identical to IMAGE 2 (COMPOSITE).
-⛔ Do NOT re-draw, re-tile, or re-imagine the texture
-⛔ Do NOT change texture scale, pattern, count, or spacing
-⛔ Do NOT zoom, crop, or change resolution
-⛔ Everything outside the wall = IDENTICAL to IMAGE 1
+RULES:
+  • Keep the EXACT same texture scale, pattern, and tiling as IMAGE 1
+  • Keep the EXACT same resolution, framing, aspect ratio — NO crop/zoom
+  • Do NOT re-draw or re-imagine the texture — only integrate it naturally
+  • The result should look like a real photograph of a room with this \
+material actually installed on the wall
 
 Output ONLY the final image. No text.
 """
 
 
-def _build_occluder_list(analysis: dict | None) -> str:
-    """Format the occluder list for the render prompt."""
-    if not analysis:
-        return (
-            "   (Carefully examine the ORIGINAL image. Every object that is in "
-            "front of the wall — furniture, frames, switches, lamps, plants, "
-            "people, etc. — must be copied from the ORIGINAL onto the textured wall.)"
-        )
-
-    occluders = analysis.get("occluders", [])
-    if not occluders:
-        extra = analysis.get("extra_exclusions", [])
-        if extra:
-            occluders = extra
-
-    if not occluders:
-        return (
-            "   (No major foreground objects detected by analysis — but CAREFULLY "
-            "examine the ORIGINAL image yourself. If you see ANY object in front "
-            "of the wall — even partially — restore it from the ORIGINAL.)"
-        )
-
-    lines = [
-        "   The following objects were detected in front of the wall:",
-    ]
-    for occ in occluders:
-        label = occ.get("label", "object")
-        depth = occ.get("depth", "in front of wall")
-        x = occ.get("x", "?")
-        y = occ.get("y", "?")
-        w = occ.get("w", "?")
-        h = occ.get("h", "?")
-        lines.append(
-            f"   • {label} ({depth}) — bbox: x={x}, y={y}, w={w}, h={h}"
-        )
-    lines.append(
-        "   ⚠️ Also check for ANY additional objects not listed — restore ALL."
-    )
-    return "\n".join(lines)
-
-
-def _build_perspective_instructions(analysis: dict | None) -> str:
-    """Format perspective section for the render prompt."""
-    if not analysis:
-        return (
-            "Match the perspective visible in the ORIGINAL photo exactly.\n"
-            "Mortar/gap lines must follow the same vanishing point and convergence."
-        )
-
-    persp = analysis.get("perspective", {})
-    ptype = persp.get("type", "frontal")
-    angle = persp.get("angleDeg", 0)
-    recedes = persp.get("recedes", "none")
-    h_conv = persp.get("horizontalConvergence", "none")
-    cam_h = persp.get("cameraHeight", "eye-level")
-
-    if ptype == "frontal" or angle < 10:
-        return (
-            f"Wall is viewed nearly HEAD-ON (~{angle}°). Camera at {cam_h}.\n"
-            f"All mortar/gap lines must be STRAIGHT and PARALLEL:\n"
-            f"  • Horizontals must be truly HORIZONTAL\n"
-            f"  • Verticals must be truly VERTICAL\n"
-            f"  • Minimal perspective distortion — only very subtle convergence."
-        )
-    else:
-        return (
-            f"Wall is viewed at ~{angle}° angle, receding to the {recedes}. "
-            f"Camera at {cam_h}.\n"
-            f"Mortar/gap lines MUST converge toward the vanishing point ({h_conv}).\n"
-            f"  • Elements on the far (receding) side appear NARROWER\n"
-            f"  • Elements on the near side appear at full width\n"
-            f"  • Follow the EXACT SAME convergence visible in the COMPOSITE.\n"
-            f"  • Do NOT straighten lines that should converge."
-        )
-
-
 def generate_photorealistic_render(
     original: Image.Image,
     composite: Image.Image,
-    mask_overlay: Image.Image,
-    product_name: str,
+    mask_overlay: Image.Image | None = None,
+    product_name: str = "product",
     product_texture: Image.Image | None = None,
     analysis: dict | None = None,
     material_type: str = "decorative stone/brick",
     product_meta: dict | None = None,
 ) -> Image.Image | None:
-    """Stage 2: Generate photorealistic render.
+    """Generate photorealistic render from 3 images.
 
-    Sends 4 images to Gemini:
-      1. ORIGINAL photograph (ground truth for lighting, objects)
-      2. COMPOSITE with texture already mapped (from deterministic projection)
-      3. MASK OVERLAY showing wall area
-      4. PRODUCT TEXTURE tile (color/detail reference for the selected product)
+    Sends 3 images to Gemini (in this order):
+      1. COMPOSITE ("Bez AI") — texture provisionally laid on the wall
+      2. ORIGINAL — unmodified room photo (ground truth)
+      3. PRODUCT TEXTURE — close-up tile/swatch of the selected product
 
-    The AI's job: integrate the composite realistically — mask foreground
-    objects, match lighting, fix wall boundaries. It does NOT re-generate
-    the texture; it only makes the existing composite look photorealistic.
-    The product texture tile ensures colors match the user's selection.
+    The AI analyzes all 3 images and produces a photorealistic blend.
+    No mask needed — the AI sees the difference between composite and original.
     """
     from google.genai import types
 
@@ -827,21 +750,17 @@ def generate_photorealistic_render(
     client = _gemini_client()
 
     meta = product_meta or {}
-    category = meta.get("category", "brick")
-    occluder_list = _build_occluder_list(analysis)
 
     prompt = _RENDER_PROMPT_TEMPLATE.format(
-        occluder_list=occluder_list,
         product_name=str(product_name or "product"),
         material_type=str(material_type),
     )
 
-    # Send 4 images: original, composite, mask overlay, product texture
+    # Send 3 images: composite ("bez ai"), original, product texture
     parts: list = [
         types.Part.from_text(text=prompt),
-        types.Part.from_bytes(data=_pil_to_bytes(original), mime_type="image/jpeg"),
         types.Part.from_bytes(data=_pil_to_bytes(composite), mime_type="image/jpeg"),
-        types.Part.from_bytes(data=_pil_to_bytes(mask_overlay), mime_type="image/jpeg"),
+        types.Part.from_bytes(data=_pil_to_bytes(original), mime_type="image/jpeg"),
     ]
     if product_texture:
         parts.append(

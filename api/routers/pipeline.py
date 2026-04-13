@@ -521,10 +521,6 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             yield _sse({"stage": "done", "ok": False, "error": str(exc)})
             return
 
-        mask_overlay = render_mask_overlay(
-            image, final_mask, alpha=0.55, max_long_side=2048
-        )
-
         # No Gemini key — return composite as-is
         if not os.environ.get("GEMINI_API_KEY"):
             yield _sse({"stage": "render", "status": "skipped",
@@ -540,19 +536,17 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             "materialType", meta.get("layoutType", "decorative stone/brick")
         )
 
-        # ── Stage 3: AI Render (one-shot — does everything) ───────────────
+        # ── Stage 3: AI Render (3 images: composite, original, texture) ───
         t2 = time.time()
         yield _sse({"stage": "render", "status": "running",
-                     "message": "Renderowanie AI — analiza sceny, maskowanie, oświetlenie (Gemini)…"})
+                     "message": "Renderowanie AI — analiza sceny, kompozycja, oświetlenie (Gemini)…"})
         raw_rendered = None
         try:
             raw_rendered = generate_photorealistic_render(
                 original=image,
                 composite=composite,
-                mask_overlay=mask_overlay,
                 product_name=product_name,
                 product_texture=texture,
-                analysis=None,
                 material_type=material_type,
                 product_meta=meta,
             )
