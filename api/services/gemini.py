@@ -142,152 +142,239 @@ def _retry_generate(client, *, model: str, contents, config=None, max_attempts: 
 # ══════════════════════════════════════════════════════════════════════════════
 
 _SCENE_ANALYSIS_PROMPT = """\
-You are a forensic architectural measurement system. Your task: measure the \
-EXACT real-world dimensions of a wall area and catalog everything visible in \
-the scene for photorealistic rendering.
+You are a forensic architectural measurement system with expertise in \
+construction, interior design, and photogrammetry. Your task: determine \
+the EXACT real-world dimensions of a wall area and catalog every element \
+in the scene for photorealistic material rendering.
 
 You receive THREE images:
   1. ORIGINAL — unmodified room/building photograph
-  2. COMPOSITE — same photo with decorative texture tiled on the wall
-  3. MASK OVERLAY — ORIGINAL with ORANGE semi-transparent highlight = target wall area
+  2. COMPOSITE — same photo with decorative texture tiled on the wall \
+(use this to verify texture scale correctness)
+  3. MASK OVERLAY — ORIGINAL with ORANGE semi-transparent highlight \
+showing the user's wall selection area
 
-═══ TASK A: MULTI-REFERENCE DIMENSIONAL CALIBRATION ═══
+════════════════════════════════════════════════════════════════
+ TASK A: MULTI-REFERENCE DIMENSIONAL CALIBRATION
+ You MUST use AT LEAST 3 independent reference objects to triangulate.
+════════════════════════════════════════════════════════════════
 
-You MUST find and use EVERY reference object visible anywhere in the photo to \
-triangulate the wall dimensions. Known real-world sizes (use as many as apply):
+Scan the ENTIRE image systematically. Identify EVERY object with known \
+real-world dimensions from ANY of these categories:
 
-DOORS (PRIMARY — most reliable, error ±3%):
-  • Standard interior door leaf: 200 cm × 80 cm
-  • Door frame/architrave adds: 6-8 cm each side, 5-8 cm top
-  • Total opening with frame: ~210 cm × ~95 cm
-  • French/balcony door: 200-220 cm × 80-180 cm
-  • Closet sliding door: 230-250 cm × 60-90 cm per panel
-  • Front/exterior door: 200-210 cm × 90-100 cm
+─── CATEGORY 1: DOORS (most reliable, ±3%) ───
+  • Standard interior door leaf height: 200 cm (ALWAYS — this is building code)
+  • Standard interior door leaf width: 70–90 cm (most common: 80 cm)
+  • Door frame/architrave adds ~7 cm each side and ~6 cm top
+  • Total opening with frame: ~213 cm × ~94 cm
+  • French/balcony door: 200–220 cm × 80–180 cm
+  • Sliding wardrobe door panel: 230–250 cm × 60–90 cm
+  • Front/exterior door: 200–210 cm × 90–100 cm
+  • A door handle is ALWAYS at 100–110 cm from the floor
 
-WINDOWS (error ±5%):
-  • Standard window: 120-150 cm tall × 80-120 cm wide
-  • Window sill from floor: 85-95 cm (interior), 90-100 cm (exterior)
-  • Curtain rod to ceiling: 10-20 cm
-  • Roller blind cassette: 7-10 cm tall
+─── CATEGORY 2: WINDOWS (±5%) ───
+  • Standard window: 120–150 cm tall × 80–120 cm wide
+  • Window sill height from floor: 85–95 cm (interior), 90–100 cm (exterior)
+  • Curtain rod to ceiling gap: 10–20 cm
+  • Roller blind cassette height: 7–10 cm
+  • Standard windowpane in residential: 50–70 cm × 40–60 cm per section
 
-ARCHITECTURAL (error ±3%):
-  • Standard EU ceiling height: 250-280 cm (most common: 260-270 cm)
-  • Standard US ceiling height: 244 cm (8 ft) or 274 cm (9 ft)
-  • Baseboard/skirting: 8-12 cm tall
-  • Crown molding: 5-10 cm
-  • Stair riser: 17-19 cm, tread: 25-30 cm
-  • Standard brick (visible outside): 6.5 cm × 25 cm
+─── CATEGORY 3: ARCHITECTURAL FIXED ELEMENTS (±3%) ───
+  • EU ceiling height: 250–280 cm (most common in Poland/EU: 260–270 cm)
+  • US ceiling height: 244 cm (8 ft) or 274 cm (9 ft)
+  • Baseboard/skirting board: 8–15 cm tall (most common: 10 cm)
+  • Crown molding: 5–10 cm
+  • Stair riser height: 17–19 cm; tread depth: 25–30 cm
+  • Standard facing brick (if visible): 6.5 cm × 25 cm × 12 cm
   • Concrete block: 19 cm × 39 cm
-  • Radiator height: 30 cm (low), 50-60 cm (standard), 90+ cm (tall)
-  • Radiator from floor: 10-15 cm
+  • Radiator height: 30 cm (low), 50–60 cm (standard), 90 cm (tall)
+  • Radiator clearance from floor: 10–15 cm
+  • Kitchen backsplash tile (standard): 10 × 10 cm or 15 × 15 cm
+  • Floor tile (standard): 30 × 30 cm, 45 × 45 cm, or 60 × 60 cm
 
-ELECTRICAL (error ±5%):
-  • Light switch plate: 8 × 8 cm, center 110-120 cm from floor
-  • Double switch plate: 8 × 15 cm
-  • Power outlet plate: 8 × 8 cm, center 25-30 cm from floor
-  • Kitchen counter outlet: 100-110 cm from floor
+─── CATEGORY 4: ELECTRICAL ELEMENTS (±5%) ───
+  • Light switch plate: 8 × 8 cm, center at 105–120 cm from floor
+  • Double switch plate: 8 × 15 cm, same height
+  • Power outlet plate: 8 × 8 cm, center at 25–30 cm from floor
+  • Kitchen counter outlet: center at 100–115 cm from floor
   • Thermostat: 8 × 12 cm, center ~150 cm from floor
+  • Light switch to door frame gap: typically 10–15 cm
 
-FURNITURE (error ±8%):
-  • Dining table height: 73-76 cm
-  • Kitchen counter/island: 85-90 cm tall
-  • Bar counter: 100-110 cm tall
-  • Chair seat: 43-47 cm from floor
-  • Chair backrest top: 85-100 cm from floor
-  • Sofa seat: 40-45 cm, backrest: 80-90 cm total
-  • Coffee table: 40-50 cm tall
-  • Bookshelf: 180-200 cm (standard), 70-80 cm (low)
-  • Desk: 72-76 cm tall
-  • Bed frame headboard: 90-120 cm from floor
-  • Bedside table: 55-65 cm tall
+─── CATEGORY 5: FURNITURE (±8%) ───
+  • Dining table height: 73–76 cm
+  • Kitchen counter/island top: 85–90 cm
+  • Bar counter height: 100–115 cm
+  • Standard dining chair seat: 43–47 cm from floor
+  • Chair backrest top: 85–100 cm from floor
+  • Sofa seat height: 40–45 cm; backrest height: 80–95 cm total
+  • Coffee table: 40–50 cm tall
+  • TV console/sideboard: 40–55 cm tall
+  • Bookshelf (full): 180–210 cm; bookshelf (low): 70–85 cm
+  • Desk height: 72–76 cm
+  • Nightstand/bedside table: 55–65 cm
+  • Bed headboard top: 90–130 cm from floor
+  • Kitchen upper cabinet bottom edge: 140–150 cm from floor
+  • Kitchen upper cabinet top: 210–230 cm from floor
 
-APPLIANCES/OBJECTS (error ±3%):
-  • TV 55": ~68 × 122 cm. TV 65": ~81 × 144 cm
-  • Refrigerator: 170-185 cm tall (standard), 60-70 cm wide
-  • Washing machine: 85 cm tall × 60 cm wide
-  • Microwave: 28-30 cm tall
-  • Standard A4 frame: 21 × 30 cm
-  • Wall clock: 25-40 cm diameter
-  • Wine bottle on shelf: 30 cm tall
-  • Standard door handle from floor: 100-110 cm
+─── CATEGORY 6: APPLIANCES & OBJECTS (±3–5%) ───
+  • TV diagonal → 55": ~68 × 122 cm;  65": ~81 × 144 cm;  75": ~93 × 166 cm
+  • Refrigerator: 170–190 cm tall × 60–70 cm wide
+  • Washing machine/dishwasher: 85 cm tall × 60 cm wide
+  • Standard microwave: 28–30 cm tall × 50–55 cm wide
+  • Wall clock diameter: 25–40 cm
+  • A4 picture frame: 21 × 30 cm (with mat/frame: ~30 × 40 cm)
+  • Wine bottle standing: 30 cm tall
+  • Standard dinner plate: 27 cm diameter
+  • Floor lamp shade center: 150–170 cm from floor
 
-HUMAN PROPORTIONS (if people visible, error ±5%):
-  • Adult standing: 165-180 cm
-  • Shoulder height: 140-155 cm
-  • Elbow height: 100-110 cm
+─── CATEGORY 7: HUMAN PROPORTIONS (if visible, ±5%) ───
+  • Adult standing height: 165–180 cm
+  • Adult shoulder height: 140–155 cm
+  • Adult elbow height: 100–110 cm
+  • Seated adult head height: 120–130 cm from floor
 
-MEASUREMENT PROCEDURE (execute ALL steps):
-  1. SCAN the entire image systematically — left to right, top to bottom
-  2. LIST every reference object you can identify with its approximate pixel span
-  3. For the 3 most reliable references, calculate px/cm ratio independently
-  4. CROSS-CHECK: all ratios should agree within 15%. Use the median.
-  5. Apply the calibrated px/cm to the orange-highlighted wall area
-  6. VERIFY: does the resulting wall height make sense given ceiling height?
-  7. VERIFY: would a standard door (200cm) fit proportionally?
+═══ MANDATORY MEASUREMENT PROCEDURE ═══
 
-═══ TASK B: OCCLUSION CATALOG ═══
+Execute ALL of these steps IN ORDER — do not skip any:
 
-List EVERY object that is IN FRONT OF or ON the wall surface within the \
-orange-highlighted area. These objects must NOT be covered by texture:
-  • Furniture touching or near the wall (shelves, TV, frames, mirrors)
-  • Architectural elements (columns, beams, window frames, door frames)
-  • Electrical (switches, outlets, thermostats)
-  • Decorative (clocks, plants, lamps, sconces, artwork)
-  • Structural (pipes, vents, radiators)
+STEP 1 — SYSTEMATIC SCAN: Examine every region of the image (top-left, \
+top-center, top-right, middle-left, … bottom-right). List every reference \
+object you spot, no matter how small.
 
-For each occluder, provide its bounding box in normalized 0-1 coordinates \
-relative to the full image.
+STEP 2 — PIXEL MEASUREMENT: For the 3–5 best reference objects, measure \
+their pixel span (height or width) as precisely as possible in the image.
 
-═══ TASK C: WALL BOUNDARY ANALYSIS ═══
+STEP 3 — INDEPENDENT px/cm CALCULATION: For EACH reference, compute:
+   px_per_cm = pixel_span / known_real_cm
+Record all values. They should agree within ±15%.
 
-The orange mask is the USER's rough selection. But texture must ONLY go on \
-the actual wall surface. Identify precisely:
-  • Where does the wall meet the CEILING? (y coordinate, normalized 0-1)
-  • Where does the wall meet the FLOOR/baseboard? (y coordinate, normalized 0-1)
-  • Where are LEFT and RIGHT wall boundaries? (corners, door frames, windows)
-  • Does the orange selection extend BEYOND the wall onto ceiling/floor/other walls?
-  • If yes: which parts of the selection should be EXCLUDED?
+STEP 4 — CROSS-VALIDATION:
+   • If a door is visible (200 cm): the room height from floor to ceiling \
+should be between 240–280 cm. If your measurement says 400 cm, something \
+is wrong — re-check.
+   • If a light switch is visible (115 cm from floor): it should be at \
+roughly 43% of the way up a 265 cm wall.
+   • If a baseboard is visible (10 cm): it should be about 3.7% of 270 cm.
+   • If furniture shows a table at 75 cm: it should be ~28% of a 270 cm wall.
+   • Use at least TWO of these sanity checks.
 
-═══ TASK D: LIGHTING ANALYSIS ═══
+STEP 5 — TAKE THE MEDIAN px/cm value, discarding outliers that deviate \
+more than 20% from the median.
 
-Analyze the EXACT lighting on the wall surface:
-  • Primary light source position relative to wall (e.g. "window left, 45° angle")
-  • Secondary/fill light sources
-  • Color temperature: warm (2700-3500K), neutral (4000-5000K), cool (5500K+)
-  • Brightness gradient across the wall (which region is brightest/darkest?)
-  • Shadow characteristics: hard (direct sun) vs soft (overcast/diffuse)
-  • Ambient occlusion darkness at ceiling/floor/corner junctions
-  • Any color cast from nearby colored surfaces (warm floor, colored wall, etc.)
-  • Overall exposure level: underexposed / correct / overexposed
+STEP 6 — APPLY to the orange-highlighted wall area:
+   wall_height_cm = wall_pixel_height / calibrated_px_per_cm
+   wall_width_cm = wall_pixel_width / calibrated_px_per_cm
 
-═══ TASK E: PERSPECTIVE ANALYSIS ═══
+STEP 7 — FINAL SANITY CHECK:
+   • Does the wall height make sense? (Indoor: 200–300 cm typical)
+   • Could a person (170 cm) stand against it proportionally?
+   • Would a standard door (200 cm) fit?
+   • Is the width reasonable for the scene? (Room widths: 200–800 cm)
 
-  • Camera angle to wall: frontal (0-10°), moderate (10-30°), strong (30°+)
-  • If angled: which side recedes? (left/right)
-  • Vanishing point direction for horizontal lines
-  • Vertical convergence (looking up/down)?
-  • Lens distortion visible? (barrel/pincushion)
+════════════════════════════════════════════════════════════════
+ TASK B: COMPLETE OCCLUSION CATALOG
+ Every object between the camera and the wall surface
+════════════════════════════════════════════════════════════════
 
-═══ TASK F: TEXTURE SCALE VALIDATION ═══
+Examine the orange-highlighted wall area in image 3. List EVERY object \
+that is IN FRONT OF the wall surface or ATTACHED to it. These objects \
+must NOT be covered by the decorative texture. Include:
 
-Look at image 2 (COMPOSITE). Do the texture elements appear the correct \
-physical size compared to reference objects? Are they too big or too small?
+  • Furniture touching/near the wall (shelves, TV, cabinets, frames, mirrors)
+  • Architectural elements crossing the wall (columns, beams, window frames, \
+door frames, reveals, molding)
+  • Electrical fixtures (switches, outlets, thermostats, intercom panels)
+  • Decorative items (clocks, sconces, wall art, pendant lights, plants)
+  • Structural elements (exposed pipes, vents, radiators, AC units)
+  • People or animals in front of the wall
+  • ANY object — even partial — that overlaps the orange area
 
-OUTPUT a single JSON object (no markdown, no backticks):
+For EACH occluder provide its bounding box as normalized 0.0–1.0 \
+coordinates relative to the full image dimensions: {"x", "y", "w", "h"}.
+
+════════════════════════════════════════════════════════════════
+ TASK C: PRECISE WALL BOUNDARY DETECTION
+ Where does the actual wall surface begin and end?
+════════════════════════════════════════════════════════════════
+
+The orange mask is the USER's rough rectangle selection. It may extend \
+BEYOND the actual wall onto the ceiling, floor, or adjacent walls. \
+You MUST identify the exact boundaries of the physical wall surface:
+
+  • CEILING LINE — the exact y-coordinate (normalized 0.0–1.0) where the \
+wall meets the ceiling. Look for: color change, shadow line, crown \
+molding lower edge, or where paint changes.
+  • FLOOR LINE — the exact y-coordinate where the wall meets the floor \
+or the TOP of the baseboard/skirting board. The texture should NOT cover \
+the baseboard — it goes to its top edge only.
+  • LEFT BOUNDARY — where the wall ends on the left (corner, door frame, \
+window frame, or image edge).
+  • RIGHT BOUNDARY — same for the right side.
+
+Check each boundary: does the orange selection extend past it?
+Flag any overrun so the system can clip the mask.
+
+════════════════════════════════════════════════════════════════
+ TASK D: COMPREHENSIVE LIGHTING ANALYSIS
+════════════════════════════════════════════════════════════════
+
+Analyze ALL light sources affecting the wall:
+
+  • Primary source: direction, type (natural/artificial), angle
+  • Secondary/fill sources (ceiling fixtures, table lamps, reflected light)
+  • Color temperature: warm (2700–3500K), neutral (4000–5000K), cool (5500K+)
+  • Brightness gradient across the wall (which side/region is brightest?)
+  • Shadow characteristics: hard edges (direct sun) vs soft (diffuse/overcast)
+  • Ambient occlusion: darkness in ceiling–wall junction, floor–wall junction, \
+corners, and behind furniture
+  • Color cast from nearby colored surfaces (warm wood floor, colored wall)
+  • Overall exposure: underexposed / correct / slightly overexposed
+  • Specular reflections visible on wall surface?
+
+════════════════════════════════════════════════════════════════
+ TASK E: PERSPECTIVE ANALYSIS
+════════════════════════════════════════════════════════════════
+
+  • Camera angle to the wall surface: frontal (0–10°), moderate (10–30°), \
+oblique (30°+)
+  • If angled: which side recedes? (left or right)
+  • Vanishing point direction for horizontal mortar/grout lines
+  • Vertical convergence (camera tilted up/down)?
+  • Lens distortion: barrel / pincushion / none?
+  • Is the camera at eye level (~155 cm), low, or high?
+
+════════════════════════════════════════════════════════════════
+ TASK F: TEXTURE SCALE VALIDATION (check COMPOSITE image)
+════════════════════════════════════════════════════════════════
+
+Look at image 2 (COMPOSITE). The texture has been tiled at a computed \
+scale. Evaluate:
+  • Do the texture elements appear the correct real-world size compared \
+to the reference objects you identified?
+  • Count the number of horizontal courses (rows) of texture visible.
+  • Given the wall height and the texture module height, is the count correct?
+  • Are textures too large? Too small? Just right?
+
+═══ OUTPUT FORMAT ═══
+
+Output a single JSON object. No markdown, no backticks, no commentary. \
+Start directly with the opening brace:
+
 {
   "wallHeightCm": 255,
   "wallWidthCm": 340,
   "ceilingHeightCm": 265,
-  "measurementMethod": "door frame at left edge used as primary (200cm), light switch confirmed (115cm from floor), ceiling height cross-checked",
+  "measurementMethod": "door frame primary (200cm=520px → 2.6 px/cm), baseboard confirmed (10cm=26px → 2.6 px/cm), chair seat cross-check (45cm=117px → 2.6 px/cm). Median px/cm = 2.6",
   "referenceObjects": [
     {"name": "interior door", "pixelHeight": 520, "realHeightCm": 200, "pxPerCm": 2.6, "confidence": "high"},
-    {"name": "light switch", "pixelHeight": 21, "realHeightCm": 8, "pxPerCm": 2.63, "confidence": "medium"},
-    {"name": "baseboard", "pixelHeight": 26, "realHeightCm": 10, "pxPerCm": 2.6, "confidence": "medium"}
+    {"name": "baseboard", "pixelHeight": 26, "realHeightCm": 10, "pxPerCm": 2.6, "confidence": "medium"},
+    {"name": "dining chair seat", "pixelHeight": 117, "realHeightCm": 45, "pxPerCm": 2.6, "confidence": "medium"}
   ],
   "calibratedPxPerCm": 2.6,
   "occluders": [
     {"x": 0.05, "y": 0.3, "w": 0.15, "h": 0.65, "label": "bookshelf", "depth": "touching_wall"},
-    {"x": 0.7, "y": 0.5, "w": 0.08, "h": 0.04, "label": "light_switch", "depth": "on_wall"}
+    {"x": 0.7, "y": 0.5, "w": 0.08, "h": 0.04, "label": "light_switch", "depth": "on_wall"},
+    {"x": 0.3, "y": 0.8, "w": 0.4, "h": 0.2, "label": "sofa_top", "depth": "30cm_from_wall"}
   ],
   "wallBoundaries": {
     "ceilingLineY": 0.02,
@@ -302,17 +389,18 @@ OUTPUT a single JSON object (no markdown, no backticks):
     "floorExclusionZone": null
   },
   "lighting": {
-    "primarySource": "window left, natural daylight",
-    "secondarySource": "ceiling fixture, warm LED",
+    "primarySource": "window left, natural daylight, 45° angle",
+    "secondarySource": "ceiling fixture, warm LED 3000K",
     "temperature": "neutral-warm",
     "temperatureKelvin": 4500,
     "gradient": "brighter-left-darker-right",
     "gradientIntensity": 0.3,
     "shadowType": "soft-diffuse",
     "shadowIntensity": 0.4,
-    "ambientOcclusion": "visible at ceiling junction and left corner",
+    "ambientOcclusion": "visible at ceiling junction and left corner, darker at baseboard",
     "colorCast": "slight warm cast from wooden floor",
-    "exposure": "correct"
+    "exposure": "correct",
+    "specularOnWall": false
   },
   "perspective": {
     "type": "frontal",
@@ -320,10 +408,11 @@ OUTPUT a single JSON object (no markdown, no backticks):
     "recedes": "none",
     "horizontalConvergence": "negligible",
     "verticalConvergence": "none",
-    "lensDistortion": "none"
+    "lensDistortion": "none",
+    "cameraHeight": "eye-level"
   },
   "textureScaleCorrect": true,
-  "scaleNote": "bricks correctly sized — ~27 courses visible matches expected 28 for 255cm wall",
+  "scaleNote": "bricks correctly sized — 28 courses counted, expected 28 for 255cm wall with 9cm course height",
   "confidence": "high"
 }"""
 
@@ -501,47 +590,81 @@ def _build_dimension_instructions(
     courses_in_wall = (wall_h_cm * 10) / course_h_mm
     units_in_row = (wall_w_cm * 10) / unit_w_mm
 
+    # Additional cross-checks for the prompt
+    courses_in_door = 2000 / course_h_mm  # standard 200cm door
+    courses_in_meter = 1000 / course_h_mm
+
     if layout in ("running-bond", "stretcher-bond"):
         return (
-            f"PRODUCT: decorative brick cladding\n"
-            f"  • Each brick: {mod_w:.0f} mm wide × {mod_h:.0f} mm tall "
-            f"(≈ {mod_w/10:.1f} × {mod_h/10:.1f} cm)\n"
-            f"  • Mortar joint: {joint:.0f} mm (≈ {joint/10:.1f} cm)\n"
+            f"PRODUCT: Decorative brick/stone cladding\n"
+            f"  • Each brick module: {mod_w:.0f} mm wide × {mod_h:.0f} mm tall "
+            f"(= {mod_w/10:.1f} × {mod_h/10:.1f} cm)\n"
+            f"  • Mortar joint: {joint:.0f} mm (= {joint/10:.1f} cm)\n"
             f"  • Course height (brick + joint): {course_h_mm:.0f} mm "
-            f"(≈ {course_h_mm/10:.1f} cm)\n"
+            f"(= {course_h_mm/10:.1f} cm)\n"
+            f"  • Unit width (brick + joint): {unit_w_mm:.0f} mm\n"
             f"\n"
-            f"WALL DIMENSIONS (measured using: {refs_text}):\n"
-            f"  • Wall height: ~{wall_h_cm:.0f} cm → should contain ~{courses_in_wall:.0f} courses\n"
-            f"  • Wall width: ~{wall_w_cm:.0f} cm → should contain ~{units_in_row:.0f} bricks per row\n"
+            f"WALL DIMENSIONS (calibrated using: {refs_text}):\n"
+            f"  • Wall height: ~{wall_h_cm:.0f} cm → MUST contain ~{courses_in_wall:.0f} courses (rows of bricks)\n"
+            f"  • Wall width: ~{wall_w_cm:.0f} cm → MUST contain ~{units_in_row:.0f} bricks per row\n"
             f"\n"
-            f"VERIFICATION CROSS-CHECKS:\n"
-            f"  • A standard door (200 cm) should span ~{2000/course_h_mm:.0f} courses alongside it\n"
-            f"  • A light switch (at 115 cm from floor) should be at ~{1150/course_h_mm:.0f} courses from floor\n"
-            f"  • 25 courses from the floor = ~{25*course_h_mm/10:.0f} cm = about knee height on an adult\n"
-            f"  • All bricks MUST appear this exact physical size. Only natural perspective "
-            f"foreshortening is allowed — bricks farther from camera appear smaller."
+            f"CRITICAL SCALE CROSS-CHECKS:\n"
+            f"  • A standard door (200 cm tall) should span exactly {courses_in_door:.0f} brick courses alongside it\n"
+            f"  • 1 meter of wall height = exactly {courses_in_meter:.1f} courses\n"
+            f"  • A light switch (115 cm from floor) should be at course ~{1150/course_h_mm:.0f} from floor\n"
+            f"  • An adult person (170 cm) standing against the wall = ~{1700/course_h_mm:.0f} courses tall\n"
+            f"  • A dining table (75 cm tall) against the wall = ~{750/course_h_mm:.0f} courses tall\n"
+            f"\n"
+            f"  ⚠️ If the number of courses in the COMPOSITE differs from ~{courses_in_wall:.0f}, the scale is WRONG.\n"
+            f"     The COMPOSITE texture has been pre-computed at the correct scale — TRUST ITS COUNT.\n"
+            f"  ⚠️ All bricks MUST appear this exact physical size. Only natural\n"
+            f"     perspective foreshortening is allowed — bricks farther from camera appear smaller."
         )
     elif layout in ("stack-bond", "vertical-stack"):
         return (
-            f"PRODUCT: decorative panels/lamels\n"
+            f"PRODUCT: Decorative panels / lamels (vertically-oriented)\n"
             f"  • Each panel: {mod_w:.0f} mm wide × {mod_h:.0f} mm tall "
-            f"(≈ {mod_w/10:.1f} × {mod_h/10:.1f} cm)\n"
-            f"  • Gap between panels: {joint:.0f} mm (≈ {joint/10:.1f} cm)\n"
+            f"(= {mod_w/10:.1f} × {mod_h/10:.1f} cm)\n"
+            f"  • Gap between panels: {joint:.0f} mm (= {joint/10:.1f} cm)\n"
+            f"  • Panel + gap width: {unit_w_mm:.0f} mm (= {unit_w_mm/10:.1f} cm)\n"
             f"\n"
-            f"WALL DIMENSIONS (measured using: {refs_text}):\n"
+            f"WALL DIMENSIONS (calibrated using: {refs_text}):\n"
             f"  • Wall height: ~{wall_h_cm:.0f} cm\n"
-            f"  • Wall width: ~{wall_w_cm:.0f} cm → should fit ~{units_in_row:.0f} panels\n"
+            f"  • Wall width: ~{wall_w_cm:.0f} cm → should fit ~{units_in_row:.0f} panels across\n"
             f"\n"
-            f"The spacing between panels MUST be exactly {joint:.0f} mm "
-            f"(~{joint/10:.1f} cm). Panels must be evenly spaced with visible gaps."
+            f"CRITICAL SCALE CROSS-CHECKS:\n"
+            f"  • A standard door (200 cm) should have {2000/unit_w_mm:.0f} panels across its width if adjacent\n"
+            f"  • 1 meter of wall width = {1000/unit_w_mm:.1f} panels\n"
+            f"  • The spacing between panels MUST be exactly {joint:.0f} mm "
+            f"(~{joint/10:.1f} cm). Panels must be evenly spaced.\n"
+            f"\n"
+            f"  ⚠️ The COMPOSITE has the correct number of panels — preserve that count EXACTLY."
+        )
+    elif layout == "random-stone":
+        return (
+            f"PRODUCT: Decorative random stone cladding\n"
+            f"  • Average stone module: {mod_w:.0f} × {mod_h:.0f} mm "
+            f"(= {mod_w/10:.1f} × {mod_h/10:.1f} cm)\n"
+            f"  • Mortar joint: {joint:.0f} mm (= {joint/10:.1f} cm)\n"
+            f"  • Average course height: {course_h_mm:.0f} mm\n"
+            f"\n"
+            f"WALL DIMENSIONS (calibrated using: {refs_text}):\n"
+            f"  • Wall height: ~{wall_h_cm:.0f} cm → ~{courses_in_wall:.0f} stone rows\n"
+            f"  • Wall width: ~{wall_w_cm:.0f} cm → ~{units_in_row:.0f} stones per row\n"
+            f"\n"
+            f"  ⚠️ Stone pattern is IRREGULAR but the AVERAGE size must match.\n"
+            f"     The COMPOSITE has the correct stone count — preserve it EXACTLY."
         )
     else:
         return (
-            f"PRODUCT: decorative {material_type}\n"
+            f"PRODUCT: Decorative {material_type}\n"
             f"  • Module: {mod_w:.0f} × {mod_h:.0f} mm, joint: {joint:.0f} mm\n"
+            f"  • Course height: {course_h_mm:.0f} mm\n"
             f"\n"
-            f"WALL: ~{wall_h_cm:.0f} × {wall_w_cm:.0f} cm (measured using: {refs_text})\n"
-            f"Maintain consistent module dimensions across the wall."
+            f"WALL: ~{wall_h_cm:.0f} × {wall_w_cm:.0f} cm "
+            f"(calibrated using: {refs_text})\n"
+            f"  • Expected ~{courses_in_wall:.0f} courses × ~{units_in_row:.0f} modules per row\n"
+            f"  ⚠️ The COMPOSITE has the correct module count — preserve it EXACTLY."
         )
 
 
@@ -550,102 +673,195 @@ def _build_dimension_instructions(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RENDER_PROMPT_TEMPLATE = """\
-You are a photorealistic PHOTO EDITOR. Your job is to take an existing \
-COMPOSITE image and make the textured wall area look like a real photograph. \
-This is IMAGE EDITING — you are NOT generating a new image from scratch.
+You are a world-class photorealistic PHOTO EDITOR specializing in \
+architectural material visualization. Your job: take an existing \
+COMPOSITE image and make the textured wall area look indistinguishable \
+from a real photograph. This is IMAGE EDITING, not image generation.
 
-YOU RECEIVE FIVE IMAGES (in order):
-  1. ORIGINAL — unmodified room photo (ground truth for everything outside wall)
-  2. COMPOSITE — room with "{product_name}" texture already placed at CORRECT \
-real-world scale
+YOU RECEIVE FIVE IMAGES (in this exact order):
+  1. ORIGINAL — the unmodified room/building photograph (ground truth)
+  2. COMPOSITE — ORIGINAL with "{product_name}" texture already placed \
+at SCIENTIFICALLY CORRECT real-world scale (computed from millimetre specs)
   3. MASK OVERLAY — ORIGINAL with ORANGE highlight = target wall area
-  4. PRODUCT TEXTURE TILE — material swatch (color/detail reference only)
-  5. ORIGINAL again (for direct comparison)
+  4. PRODUCT TEXTURE TILE — a sample swatch (for color/detail reference only)
+  5. ORIGINAL AGAIN — for direct side-by-side comparison
 
-╔══════════════════════════════════════════════════════════════════╗
-║  #1 CRITICAL RULE — PATTERN LOCK                                ║
-║                                                                  ║
-║  The COMPOSITE (image 2) has SCIENTIFICALLY CORRECT texture.    ║
-║  It was computed from real product dimensions in millimetres.   ║
-║  You MUST preserve the EXACT pattern:                            ║
-║                                                                  ║
-║  → COUNT every {unit_label} in the COMPOSITE image              ║
-║  → Your output MUST have the IDENTICAL number of {unit_label}s  ║
-║  → Each {unit_label} must be the SAME WIDTH as in the COMPOSITE ║
-║  → The {joint_label} spacing must be IDENTICAL                   ║
-║                                                                  ║
-║  DO NOT re-draw, re-tile, or re-imagine the texture.            ║
-║  DO NOT make {unit_label}s wider, narrower, taller, or shorter. ║
-║  If the COMPOSITE shows narrow {unit_label}s — keep them narrow.║
-║  If it shows many {unit_label}s — keep the same count.          ║
-╚══════════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║   #1  ABSOLUTE LAW — PATTERN LOCK                                   ║
+║                                                                      ║
+║   The COMPOSITE (image 2) contains SCIENTIFICALLY CORRECT texture.  ║
+║   It was computed using real product dimensions in millimetres and   ║
+║   calibrated wall measurements. THE PATTERN IS SACRED.              ║
+║                                                                      ║
+║   BEFORE you start editing, COUNT:                                   ║
+║     → How many horizontal rows (courses) of {unit_label}s?          ║
+║     → How many {unit_label}s per row?                                ║
+║     → What is the {joint_label} width relative to {unit_label} size?║
+║                                                                      ║
+║   YOUR OUTPUT MUST HAVE:                                             ║
+║     → The IDENTICAL number of rows                                   ║
+║     → The IDENTICAL number of {unit_label}s per row                  ║
+║     → The IDENTICAL {joint_label} width                              ║
+║     → The IDENTICAL proportions of each {unit_label}                 ║
+║                                                                      ║
+║   ⛔ DO NOT re-draw, re-tile, re-generate, or re-imagine.           ║
+║   ⛔ DO NOT make {unit_label}s wider, narrower, taller, or shorter. ║
+║   ⛔ DO NOT add or remove {unit_label}s.                            ║
+║   ⛔ DO NOT change the {joint_label} width or spacing.              ║
+║   ⛔ If the COMPOSITE shows small, many {unit_label}s — KEEP THEM. ║
+║   ⛔ If the COMPOSITE shows few, large {unit_label}s — KEEP THEM.  ║
+║                                                                      ║
+║   Think of it this way: the COMPOSITE is a photograph of a real     ║
+║   wall with this product already installed. You are merely editing  ║
+║   the photograph to improve realism. You would never change the     ║
+║   bricks in a real photograph. Same here.                           ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-╔══════════════════════════════════════════════════════════════╗
-║  #2 WALL ONLY — never ceiling, floor, adjacent walls,      ║
-║  furniture, or objects in front of the wall.                ║
-╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║   #2  ABSOLUTE LAW — WALL SURFACE ONLY                              ║
+║                                                                      ║
+║   The texture MUST cover ONLY the wall surface. It must NEVER       ║
+║   appear on ANY of the following:                                    ║
+║                                                                      ║
+║   ⛔ CEILING — even if the orange mask extends to the top            ║
+║   ⛔ FLOOR — even if the orange mask extends to the bottom           ║
+║   ⛔ ADJACENT WALLS — walls visible at an angle to the left/right    ║
+║   ⛔ DOOR/WINDOW REVEALS — the inner surfaces of openings            ║
+║   ⛔ BASEBOARD/SKIRTING — the trim at the bottom of the wall        ║
+║   ⛔ CROWN MOLDING — the trim at the top of the wall                ║
+║                                                                      ║
+║   If the orange selection extends past the wall boundary, TRIM the  ║
+║   texture AT the wall edge. Show the original ceiling/floor beyond. ║
+║                                                                      ║
+║   The texture stops at:                                              ║
+║   • TOP: the ceiling–wall junction (or bottom of crown molding)      ║
+║   • BOTTOM: the top of the baseboard (or wall–floor junction)        ║
+║   • LEFT/RIGHT: wall corners, door/window frames                    ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-═══ YOUR TASK (photo editing, NOT generation) ═══
+╔══════════════════════════════════════════════════════════════════════╗
+║                                                                      ║
+║   #3  ABSOLUTE LAW — FOREGROUND OBJECT PRESERVATION                 ║
+║                                                                      ║
+║   Objects that are IN FRONT OF the wall MUST be fully visible.       ║
+║   The texture goes BEHIND them. Copy these objects pixel-for-pixel   ║
+║   from the ORIGINAL image onto the textured wall.                    ║
+║                                                                      ║
+║   This includes: furniture, TV, shelves, frames, mirrors, clocks,   ║
+║   lamps, switches, outlets, plants, people, pets, curtains, blinds, ║
+║   radiators, pipes — ANYTHING between the camera and the wall.      ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-Start with the COMPOSITE. Apply ONLY these photorealistic adjustments:
-  1. Match the ORIGINAL's lighting/shadows onto the textured wall
-  2. Add surface relief (micro-shadows on {shadow_edge}, recessed {joint_label}s)
-  3. Blend wall edges naturally (thin AO shadow lines at junctions)
-  4. Restore foreground objects from ORIGINAL on top of texture
-  5. Keep everything outside wall pixel-identical to ORIGINAL
+════════════════════════════════════════════════════════════════
+YOUR EDITING TASK — apply ONLY these photorealistic adjustments to the \
+COMPOSITE image:
+════════════════════════════════════════════════════════════════
 
-You are NOT allowed to:
-  ✗ Change the number of {unit_label}s (count them — keep the count)
-  ✗ Change the width or height of any {unit_label}
-  ✗ Re-draw or re-generate the texture pattern
-  ✗ Change the {joint_label} spacing or width
-  ✗ Zoom, crop, pan, reframe, or change dimensions
+1. LIGHTING TRANSFER — Study the ORIGINAL image's lighting carefully. \
+Apply the EXACT SAME lighting conditions to the textured wall:
+   • Match brightness gradient (which side is brighter/darker)
+   • Match color temperature (warm/cool tint)
+   • If there's a window casting light — the wall near the window \
+should be brighter, gradually darkening away from it
+   • Apply the same exposure level as the ORIGINAL
 
-═══ FOREGROUND OBJECTS (restore from ORIGINAL) ═══
+2. SURFACE RELIEF — Add physical depth to the {unit_label}s:
+   • Each {unit_label} has {bump_depth}mm of relief
+   • Cast micro-shadows on the {shadow_edge} (shadow direction \
+must match the ORIGINAL's light direction)
+   • {joint_label}s are recessed — they appear darker than faces
+   • Light-facing edges get subtle highlight, shadow-facing get darker
+
+3. AMBIENT OCCLUSION — Add darkening at junctions:
+   • Thin shadow line where wall meets ceiling
+   • Thin shadow line where wall meets floor/baseboard
+   • Darker zones in corners where walls meet
+   • Contact shadows behind furniture touching the wall
+
+4. FOREGROUND RESTORATION — For EVERY object in front of the wall:
+   • Copy the object from the ORIGINAL image
+   • Place it on TOP of the textured wall
+   • Match the exact position, size, and edges from the ORIGINAL
+   • Include the object's shadow on the wall if visible in ORIGINAL
+
+5. NON-WALL PRESERVATION — Everything outside the wall area MUST be \
+pixel-identical to the ORIGINAL:
+   • Floor, ceiling, adjacent walls — untouched
+   • Furniture, objects, decorations — untouched
+   • Door/window reveals — untouched
+
+════════════════════════════════════════════════════════════════
+FOREGROUND OBJECTS TO RESTORE FROM ORIGINAL:
+════════════════════════════════════════════════════════════════
 
 {occluder_list}
-These appear IN FRONT of the texture — copy from ORIGINAL onto the textured wall.
 
-═══ PRODUCT DIMENSIONS ═══
+Even if an object is NOT listed above — if you see ANYTHING in the \
+ORIGINAL that should be in front of the wall, RESTORE IT.
+
+════════════════════════════════════════════════════════════════
+PRODUCT DIMENSIONS (for scale verification only — do NOT re-tile):
+════════════════════════════════════════════════════════════════
 
 {dimension_instructions}
 
-═══ SURFACE PHYSICS ═══
+════════════════════════════════════════════════════════════════
+SURFACE PHYSICS:
+════════════════════════════════════════════════════════════════
 
 {surface_rendering}
-Relief: {bump_depth}mm → micro-shadows on {shadow_edge}
-{joint_label}s recessed → appear in shadow, darker than faces
+Relief depth: {bump_depth}mm → micro-shadows on {shadow_edge}
+{joint_label}s are recessed into the wall → always darker than {unit_label} faces
+Joint color: typically darker gray/charcoal, NOT white
+{unit_label} faces: preserve the COMPOSITE's color and texture exactly
 
-═══ LIGHTING (copy from ORIGINAL) ═══
+════════════════════════════════════════════════════════════════
+LIGHTING (replicate from ORIGINAL photograph):
+════════════════════════════════════════════════════════════════
 
   • Primary: {lighting_primary} (~{lighting_kelvin}K {lighting_temperature})
   • Gradient: {lighting_gradient}
   • Shadows: {shadow_type}, intensity {shadow_intensity}
-  • AO: {ambient_occlusion}
+  • Ambient occlusion: {ambient_occlusion}
   • Color cast: {color_cast}
   • {temperature_effect}
 
-═══ PERSPECTIVE ═══
+════════════════════════════════════════════════════════════════
+PERSPECTIVE:
+════════════════════════════════════════════════════════════════
 
 {perspective_instructions}
 
-═══ FINAL VERIFICATION ═══
+╔══════════════════════════════════════════════════════════════╗
+║  FINAL CHECKLIST — verify ALL before outputting:            ║
+║                                                              ║
+║  ☐ COUNT {unit_label}s/rows — SAME as COMPOSITE?            ║
+║  ☐ Each {unit_label} SAME size as in COMPOSITE?             ║
+║  ☐ Texture ONLY on wall — NOT on ceiling/floor/other walls? ║
+║  ☐ ALL foreground objects from ORIGINAL restored?           ║
+║  ☐ Lighting gradient matches ORIGINAL?                      ║
+║  ☐ Contact shadows present where objects meet wall?         ║
+║  ☐ Same image resolution and aspect ratio — NO crop/zoom?  ║
+║  ☐ Everything outside wall = ORIGINAL?                       ║
+╚══════════════════════════════════════════════════════════════╝
 
-  ☐ COUNT {unit_label}s in output — SAME number as COMPOSITE?
-  ☐ Each {unit_label} SAME width as in COMPOSITE?
-  ☐ Texture on wall ONLY — not ceiling/floor/other walls?
-  ☐ ALL foreground objects from ORIGINAL preserved?
-  ☐ Brightness gradient matches ORIGINAL?
-  ☐ Same resolution/aspect — NO crop/zoom/pan?
-
-Output ONLY the final image. No text.
+Output ONLY the final photorealistic image. No text, no commentary.
 """
 
 
 def _build_occluder_list(analysis: dict | None) -> str:
     """Format the occluder list for the render prompt."""
     if not analysis:
-        return "   (Analyze the ORIGINAL image for any objects in front of the wall)"
+        return (
+            "   (Carefully examine the ORIGINAL image. Every object that is in "
+            "front of the wall — furniture, frames, switches, lamps, plants, "
+            "people, etc. — must be copied from the ORIGINAL onto the textured wall.)"
+        )
 
     occluders = analysis.get("occluders", [])
     if not occluders:
@@ -654,40 +870,63 @@ def _build_occluder_list(analysis: dict | None) -> str:
             occluders = extra
 
     if not occluders:
-        return "   (No major foreground objects detected — but double-check the ORIGINAL)"
+        return (
+            "   (No major foreground objects detected by analysis — but CAREFULLY "
+            "examine the ORIGINAL image yourself. If you see ANY object in front "
+            "of the wall — even partially — restore it from the ORIGINAL.)"
+        )
 
-    lines = []
+    lines = [
+        "   The following objects were detected in front of the wall:",
+    ]
     for occ in occluders:
         label = occ.get("label", "object")
         depth = occ.get("depth", "in front of wall")
-        lines.append(f"   - {label} ({depth})")
+        x = occ.get("x", "?")
+        y = occ.get("y", "?")
+        w = occ.get("w", "?")
+        h = occ.get("h", "?")
+        lines.append(
+            f"   • {label} ({depth}) — bbox: x={x}, y={y}, w={w}, h={h}"
+        )
+    lines.append(
+        "   ⚠️ Also check for ANY additional objects not listed — restore ALL."
+    )
     return "\n".join(lines)
 
 
 def _build_perspective_instructions(analysis: dict | None) -> str:
     """Format perspective section for the render prompt."""
     if not analysis:
-        return "Match the perspective visible in the ORIGINAL photo exactly."
+        return (
+            "Match the perspective visible in the ORIGINAL photo exactly.\n"
+            "Mortar/gap lines must follow the same vanishing point and convergence."
+        )
 
     persp = analysis.get("perspective", {})
     ptype = persp.get("type", "frontal")
     angle = persp.get("angleDeg", 0)
     recedes = persp.get("recedes", "none")
     h_conv = persp.get("horizontalConvergence", "none")
+    cam_h = persp.get("cameraHeight", "eye-level")
 
     if ptype == "frontal" or angle < 10:
         return (
-            f"Wall is viewed nearly head-on (~{angle}°). "
-            f"Mortar/gap lines must be straight and parallel — "
-            f"horizontals truly horizontal, verticals truly vertical. "
-            f"Minimal perspective distortion."
+            f"Wall is viewed nearly HEAD-ON (~{angle}°). Camera at {cam_h}.\n"
+            f"All mortar/gap lines must be STRAIGHT and PARALLEL:\n"
+            f"  • Horizontals must be truly HORIZONTAL\n"
+            f"  • Verticals must be truly VERTICAL\n"
+            f"  • Minimal perspective distortion — only very subtle convergence."
         )
     else:
         return (
             f"Wall is viewed at ~{angle}° angle, receding to the {recedes}. "
-            f"Mortar/gap lines converge toward the vanishing point ({h_conv}). "
-            f"Far-side elements appear narrower due to foreshortening. "
-            f"Follow the SAME convergence visible in the ORIGINAL."
+            f"Camera at {cam_h}.\n"
+            f"Mortar/gap lines MUST converge toward the vanishing point ({h_conv}).\n"
+            f"  • Elements on the far (receding) side appear NARROWER\n"
+            f"  • Elements on the near side appear at full width\n"
+            f"  • Follow the EXACT SAME convergence visible in the COMPOSITE.\n"
+            f"  • Do NOT straighten lines that should converge."
         )
 
 
@@ -715,7 +954,7 @@ def generate_photorealistic_render(
     is_wood = category == "wood"
 
     unit_label = "stone" if is_stone else "panel" if is_wood else "brick"
-    joint_label = "mortar" if (is_brick or is_stone) else "gap"
+    joint_label = "mortar joint" if (is_brick or is_stone) else "gap"
     course_label = "stone rows" if is_stone else "panel rows" if is_wood else "brick courses"
 
     roughness = float(meta.get("roughness", 0.7))
@@ -727,19 +966,21 @@ def generate_photorealistic_render(
         surface_rendering = (
             f"ROUGH MATTE material ({roughness*100:.0f}% roughness). "
             f"ZERO specular highlights, ZERO shine. "
-            f"Surface: {surface_desc}"
+            f"Light scatters diffusely — no glossy spots. "
+            f"Surface character: {surface_desc}"
         )
     elif roughness > 0.5:
         surface_rendering = (
             f"Near-matte surface ({roughness*100:.0f}% roughness). "
             f"Extremely subtle light variation, but NO specular spots. "
-            f"Surface: {surface_desc}"
+            f"Surface character: {surface_desc}"
         )
     else:
         surface_rendering = (
-            f"Subtle satin sheen ({roughness*100:.0f}% roughness, {specular*100:.0f}% specular). "
+            f"Subtle satin sheen ({roughness*100:.0f}% roughness, "
+            f"{specular*100:.0f}% specular). "
             f"Soft diffuse reflection visible only at oblique angles. "
-            f"Surface: {surface_desc}"
+            f"Surface character: {surface_desc}"
         )
 
     shadow_edge = "bottom and right edges" if is_brick or is_stone else "gap edges"
@@ -758,11 +999,20 @@ def generate_photorealistic_render(
     exposure = lt.get("exposure", "correct")
 
     if lighting_temp in ("warm", "neutral-warm"):
-        temperature_effect = "Warm light tints the wall surface slightly orange/yellow — apply subtly"
+        temperature_effect = (
+            "Warm light tints the wall surface slightly orange/yellow — "
+            "apply the SAME warmth visible in the ORIGINAL, not more, not less"
+        )
     elif lighting_temp in ("cool", "neutral-cool"):
-        temperature_effect = "Cool light tints the wall slightly blue — apply subtly"
+        temperature_effect = (
+            "Cool light tints the wall slightly blue — "
+            "apply the SAME cool tint visible in the ORIGINAL"
+        )
     else:
-        temperature_effect = "Neutral light — minimal color shift on the wall surface"
+        temperature_effect = (
+            "Neutral light — minimal color shift. "
+            "Match the ORIGINAL's color temperature exactly"
+        )
 
     dim_instructions = _build_dimension_instructions(meta, material_type, analysis)
     occluder_list = _build_occluder_list(analysis)
@@ -843,49 +1093,100 @@ def generate_photorealistic_render(
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STAGE 3: Verification & Correction
-# Compare render with original to fix occlusion and lighting
+# Compare render with original to fix occlusion, boundaries, and lighting
 # ══════════════════════════════════════════════════════════════════════════════
 
 _VERIFICATION_PROMPT = """\
-You are a photorealistic rendering QA engine. Compare the RENDERED image \
-with the ORIGINAL photograph and fix issues. This is CORRECTION, not re-creation.
+You are a photorealistic rendering QA engineer performing a FINAL quality \
+check. You must compare the RENDERED image with the ORIGINAL photograph \
+and correct ANY issues. This is SURGICAL CORRECTION, not re-creation.
 
 YOU RECEIVE FOUR IMAGES:
-  1. ORIGINAL — unmodified room photograph (ground truth)
-  2. RENDERED — AI visualization to be corrected
-  3. MASK OVERLAY — ORANGE highlight = target wall area
-  4. PRODUCT TEXTURE TILE — the material being applied
+  1. ORIGINAL — the unmodified room photograph (GROUND TRUTH for everything \
+except the wall texture)
+  2. RENDERED — the AI visualization that needs QA and correction
+  3. MASK OVERLAY — ORIGINAL with ORANGE highlight = target wall area
+  4. PRODUCT TEXTURE TILE — the decorative material being applied
 
-╔══════════════════════════════════════════════════════════════╗
-║  PATTERN LOCK: Do NOT change the texture pattern.           ║
-║  Keep the SAME number, size, and spacing of elements.       ║
-║  Do NOT make bricks/panels wider, narrower, or fewer.       ║
-╚══════════════════════════════════════════════════════════════╝
+╔══════════════════════════════════════════════════════════════════════╗
+║  PATTERN LOCK: Do NOT change the texture pattern, scale, or count. ║
+║  Keep the SAME number, size, and spacing of all elements.          ║
+║  Do NOT make bricks/panels/stones wider, narrower, or fewer.      ║
+║  The texture in the RENDERED is considered correct — only fix      ║
+║  photorealistic integration issues.                                ║
+╚══════════════════════════════════════════════════════════════════════╝
 
-═══ CHECK AND FIX ═══
+════════════════════════════════════════════════════════════════
+EXECUTE THIS QA CHECKLIST — fix every issue you find:
+════════════════════════════════════════════════════════════════
 
-1. FOREGROUND OBJECTS: Is any furniture/frame/switch covered by texture?
-   → Restore it from ORIGINAL. Texture goes BEHIND objects.
+CHECK 1: FOREGROUND OBJECT OCCLUSION
+  Compare RENDERED with ORIGINAL pixel by pixel in the wall area:
+  • Is ANY object that was visible in the ORIGINAL now covered by texture?
+  • Check for: furniture, TV, frames, mirrors, shelves, clocks, switches, \
+outlets, plants, lamps, sconces, radiators, pipes, decorations, people
+  • If you find a covered object → RESTORE IT from the ORIGINAL
+  • The texture must go BEHIND all objects — objects are IN FRONT
+  • Pay special attention to:
+    - Objects partially in front of the wall (e.g., sofa top peeking above)
+    - Thin objects (cables, lamp cords, curtain edges)
+    - Small objects (switches, outlets, small frames)
 
-2. BOUNDARIES: Has texture leaked onto ceiling/floor/adjacent wall?
-   → Remove it, show original surface.
+CHECK 2: BOUNDARY LEAKS
+  Compare the wall boundaries in RENDERED vs ORIGINAL:
+  • Has texture LEAKED onto the CEILING? → Remove it, show original ceiling
+  • Has texture LEAKED onto the FLOOR? → Remove it, show original floor
+  • Has texture LEAKED onto ADJACENT WALLS? → Remove it, show original wall
+  • Has texture covered the BASEBOARD? → Remove it, show original baseboard
+  • Has texture covered DOOR/WINDOW FRAMES? → Remove it, show original
+  • Has texture covered CROWN MOLDING? → Remove, show original
+  • The texture must stop PRECISELY at the wall boundary
+  • If in doubt: compare with the ORIGINAL — which surfaces had the \
+original wall paint/finish? Only THOSE surfaces get texture.
 
-3. LIGHTING: Does brightness gradient match ORIGINAL?
-   → Fix mismatches. Add contact shadows where furniture meets wall.
+CHECK 3: LIGHTING MATCH
+  Compare the overall brightness and color of RENDERED vs ORIGINAL:
+  • Does the brightness gradient match? (Is the same side brighter/darker?)
+  • Is the color temperature similar? (Warm/cool tint must match)
+  • Are there artificial-looking dark or bright patches on the wall?
+  • Are contact shadows present where furniture touches the wall?
+  • Is the exposure level similar? (Not overly bright or dark)
+  If mismatched → Adjust the wall texture brightness/tint to match ORIGINAL
 
-4. TEXTURE COUNT: Does the number of bricks/panels/stones match RENDERED?
-   → Do NOT change the count. Only fix colour/lighting issues.
+CHECK 4: EDGE QUALITY
+  Examine all transition zones:
+  • Wall-to-ceiling junction: thin, natural shadow line?
+  • Wall-to-floor junction: clean transition with baseboard visible?
+  • Wall corners: natural shadow in the corner?
+  • Around door/window frames: clean edge, no texture overlap?
+  • Furniture edges: natural contact shadow, no hard cutline?
+  If harsh or unnatural → Smooth the transitions
 
-5. EDGES: Smooth transitions at wall junctions?
-   → Thin shadow lines, no harsh cuts.
+CHECK 5: TEXTURE INTEGRITY (verify, don't change)
+  • Is the texture count (rows and columns) the same as in the RENDERED?
+  • Are the texture elements distorted or warped unnaturally?
+  • If the texture appears correct → DO NOT CHANGE IT
+  • Only fix color/lighting issues, never re-tile
 
-═══ RULES ═══
-  • SAME resolution/aspect — NO crop/zoom/pan
-  • Everything outside wall = pixel-identical to ORIGINAL
-  • Do NOT change texture scale, count, or pattern
-  • If no issues found, return RENDERED unchanged
+CHECK 6: RESOLUTION & FRAMING
+  • Is the output the SAME resolution as the inputs?
+  • Is there any unwanted zoom, crop, or pan?
+  • Is the aspect ratio preserved?
+  If yes to any issue → Fix it
 
-Return ONLY the corrected image. No text.
+════════════════════════════════════════════════════════════════
+RULES FOR CORRECTION:
+════════════════════════════════════════════════════════════════
+
+  • SAME resolution and aspect ratio — NO crop/zoom/pan/reframe
+  • Everything outside the wall area = pixel-identical to ORIGINAL
+  • Do NOT re-generate or re-draw the texture — only fix integration
+  • Do NOT change the texture pattern, scale, count, or spacing
+  • If the RENDERED has NO issues → return it UNCHANGED
+  • The goal is a result where a viewer cannot tell the texture was \
+digitally added — it must look like a real installed material
+
+Output ONLY the corrected image. No text, no commentary.
 """
 
 
@@ -895,7 +1196,7 @@ def verify_and_correct_render(
     mask_overlay: Image.Image,
     product_texture: Image.Image | None = None,
 ) -> Image.Image | None:
-    """Stage 3: Compare render with original, fix occlusion & lighting issues."""
+    """Stage 3: Compare render with original, fix occlusion, boundaries & lighting."""
     from google.genai import types
 
     model_name = image_model_name()

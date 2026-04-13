@@ -39,8 +39,50 @@ interface RenderData {
   geminiModel: string;
   timings: Record<string, number>;
   scale?: ScaleInfo;
+  analysis?: Record<string, unknown>;
 }
 type ResultTab = "final" | "composite" | "compare";
+
+/* ── Pipeline stage tracking ── */
+
+interface PipelineStage {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "done" | "error" | "warning" | "skipped";
+  timing?: number;
+  detail?: string;
+  error?: string;
+  message?: string;
+  analysis?: Record<string, unknown>;
+}
+
+const INITIAL_STAGES: PipelineStage[] = [
+  { id: "decode", label: "Dekodowanie obrazu", status: "pending" },
+  { id: "texture", label: "Projekcja tekstury", status: "pending" },
+  { id: "analysis", label: "Analiza sceny (AI)", status: "pending" },
+  { id: "retile", label: "Kalibracja skali", status: "pending" },
+  { id: "render", label: "Render fotorealistyczny (AI)", status: "pending" },
+  { id: "verify", label: "Weryfikacja i korekta (AI)", status: "pending" },
+];
+
+function StageIcon({ status }: { status: PipelineStage["status"] }) {
+  switch (status) {
+    case "done":
+      return <span className="text-emerald-500 text-sm">✓</span>;
+    case "running":
+      return (
+        <span className="inline-block w-3.5 h-3.5 border-2 border-[#A01B1B] border-t-transparent rounded-full animate-spin" />
+      );
+    case "error":
+      return <span className="text-red-500 text-sm">✗</span>;
+    case "warning":
+      return <span className="text-amber-500 text-sm">⚠</span>;
+    case "skipped":
+      return <span className="text-stone-300 text-sm">–</span>;
+    default:
+      return <span className="text-stone-300 text-sm">○</span>;
+  }
+}
 
 /* ── Image preparation (EXIF-safe, size-safe for Vercel) ── */
 
@@ -154,40 +196,149 @@ function IconCart() { return <svg width="16" height="16" viewBox="0 0 24 24" fil
 
 /* ── Loading overlay ── */
 
-function LoadingOverlay({ progress }: { progress: string }) {
+function PipelineStatusPanel({ stages, isOverlay }: { stages: PipelineStage[]; isOverlay?: boolean }) {
+  const [expandedAnalysis, setExpandedAnalysis] = useState(false);
+  const currentRunning = stages.find(s => s.status === "running");
+  const completedCount = stages.filter(s => s.status === "done" || s.status === "warning" || s.status === "skipped").length;
+  const totalStages = stages.length;
+  const hasErrors = stages.some(s => s.status === "error");
+
+  // Find the analysis stage to show its data
+  const analysisStage = stages.find(s => s.id === "analysis");
+  const analysisData = analysisStage?.analysis as Record<string, unknown> | undefined;
+
+  const wrapperClass = isOverlay
+    ? "absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/90 backdrop-blur-md rounded-2xl animate-fade-in p-4"
+    : "w-full";
+
   return (
-    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/80 backdrop-blur-md rounded-2xl animate-fade-in">
-      <div className="relative w-20 h-20 mb-5">
-        {/* background track */}
-        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 80 80" fill="none">
-          <circle cx="40" cy="40" r="34" stroke="#f5f0ed" strokeWidth="4" />
-        </svg>
-        {/* primary arc — rotating */}
-        <svg className="absolute inset-0 w-full h-full animate-loader-spin" viewBox="0 0 80 80" fill="none">
-          <circle cx="40" cy="40" r="34" stroke="url(#loaderGrad)" strokeWidth="4" strokeLinecap="round" strokeDasharray="160 54" />
-          <defs>
-            <linearGradient id="loaderGrad" x1="0" y1="0" x2="80" y2="80" gradientUnits="userSpaceOnUse">
-              <stop stopColor="#A01B1B" />
-              <stop offset="1" stopColor="#A01B1B" stopOpacity="0.15" />
-            </linearGradient>
-          </defs>
-        </svg>
-        {/* secondary arc — counter-rotating, subtle */}
-        <svg className="absolute inset-0 w-full h-full animate-loader-spin-reverse" viewBox="0 0 80 80" fill="none">
-          <circle cx="40" cy="40" r="26" stroke="#A01B1B" strokeWidth="2" strokeLinecap="round" strokeDasharray="40 122" opacity="0.2" />
-        </svg>
-        {/* center icon */}
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#A01B1B]/10 to-[#A01B1B]/5 flex items-center justify-center animate-pulse-glow">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#A01B1B" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="opacity-60">
-              <path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74L12 2z"/>
+    <div className={wrapperClass}>
+      {isOverlay && (
+        <>
+          <div className="relative w-14 h-14 mb-4">
+            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 56 56" fill="none">
+              <circle cx="28" cy="28" r="24" stroke="#f5f0ed" strokeWidth="3" />
             </svg>
+            <svg className="absolute inset-0 w-full h-full animate-loader-spin" viewBox="0 0 56 56" fill="none">
+              <circle cx="28" cy="28" r="24" stroke="#A01B1B" strokeWidth="3" strokeLinecap="round"
+                strokeDasharray={`${(completedCount / totalStages) * 151} ${151 - (completedCount / totalStages) * 151}`}
+                transform="rotate(-90 28 28)" />
+            </svg>
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="text-xs font-bold text-[#A01B1B]">{completedCount}/{totalStages}</span>
+            </div>
           </div>
+          <p className="text-sm font-semibold text-stone-700 mb-1">Generowanie wizualizacji</p>
+          {currentRunning && (
+            <p className="text-[11px] text-stone-500 mb-3 bg-stone-100 px-3 py-1 rounded-full">
+              {currentRunning.message || currentRunning.label}
+            </p>
+          )}
+        </>
+      )}
+
+      <div className={`w-full ${isOverlay ? 'max-w-md' : ''}`}>
+        <div className="space-y-1">
+          {stages.map((s) => (
+            <div key={s.id} className={`flex items-start gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
+              s.status === "running" ? "bg-[#A01B1B]/5" : ""
+            }`}>
+              <div className="mt-0.5 w-4 flex-shrink-0 flex justify-center">
+                <StageIcon status={s.status} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className={`text-[11px] font-medium ${
+                    s.status === "running" ? "text-[#A01B1B]" :
+                    s.status === "error" ? "text-red-600" :
+                    s.status === "done" ? "text-stone-700" :
+                    "text-stone-400"
+                  }`}>
+                    {s.label}
+                  </span>
+                  {s.timing !== undefined && (
+                    <span className="text-[10px] text-stone-400 tabular-nums flex-shrink-0">
+                      {s.timing}s
+                    </span>
+                  )}
+                </div>
+                {s.detail && s.status !== "running" && (
+                  <p className="text-[10px] text-stone-400 mt-0.5 truncate">{s.detail}</p>
+                )}
+                {s.error && (
+                  <p className={`text-[10px] mt-0.5 ${s.status === "error" ? "text-red-500" : "text-amber-600"}`}>
+                    {s.error}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
+
+        {/* Expandable analysis details */}
+        {analysisData && (analysisStage?.status === "done") && (
+          <div className="mt-2 border-t border-stone-100 pt-2">
+            <button
+              type="button"
+              onClick={() => setExpandedAnalysis(!expandedAnalysis)}
+              className="flex items-center gap-1.5 text-[10px] font-semibold text-stone-500 hover:text-stone-700 transition-colors cursor-pointer"
+            >
+              <span className="transform transition-transform" style={{ transform: expandedAnalysis ? 'rotate(90deg)' : '' }}>▶</span>
+              Szczegóły analizy sceny
+            </button>
+            {expandedAnalysis && (
+              <div className="mt-1.5 pl-4 space-y-1 text-[10px] text-stone-500">
+                {analysisData.wallHeightCm && (
+                  <p>📐 Ściana: <b>{String(analysisData.wallHeightCm)} × {String(analysisData.wallWidthCm)} cm</b></p>
+                )}
+                {analysisData.ceilingHeightCm && (
+                  <p>🏠 Sufit: <b>{String(analysisData.ceilingHeightCm)} cm</b></p>
+                )}
+                {analysisData.confidence && (
+                  <p>🎯 Pewność: <b className={String(analysisData.confidence) === 'high' ? 'text-emerald-600' : String(analysisData.confidence) === 'medium' ? 'text-amber-600' : 'text-red-500'}>{String(analysisData.confidence)}</b></p>
+                )}
+                {analysisData.measurementMethod && (
+                  <p>📏 Metoda: <span className="text-stone-400">{String(analysisData.measurementMethod)}</span></p>
+                )}
+                {Array.isArray(analysisData.referenceObjects) && (analysisData.referenceObjects as Array<Record<string, unknown>>).length > 0 && (
+                  <div>
+                    <p>📌 Referencje:</p>
+                    <ul className="ml-3">
+                      {(analysisData.referenceObjects as Array<Record<string, unknown>>).map((r, i) => (
+                        <li key={i}>• {String(r.name)} ({String(r.realHeightCm)}cm, px/cm: {String(r.pxPerCm)}, {String(r.confidence)})</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {Array.isArray(analysisData.occluders) && (analysisData.occluders as string[]).length > 0 && (
+                  <p>🚧 Przeszkody: {(analysisData.occluders as string[]).join(", ")}</p>
+                )}
+                {analysisData.textureScaleCorrect !== undefined && (
+                  <p>📊 Skala tekstury: <b className={analysisData.textureScaleCorrect ? 'text-emerald-600' : 'text-red-500'}>
+                    {analysisData.textureScaleCorrect ? "prawidłowa" : "nieprawidłowa"}
+                  </b>
+                  {analysisData.scaleNote && <span className="text-stone-400"> — {String(analysisData.scaleNote)}</span>}
+                  </p>
+                )}
+                {analysisData.lighting && typeof analysisData.lighting === 'object' && (
+                  <div>
+                    <p>💡 Oświetlenie:</p>
+                    <ul className="ml-3">
+                      {(analysisData.lighting as Record<string,unknown>).primarySource && <li>• Źródło: {String((analysisData.lighting as Record<string,unknown>).primarySource)}</li>}
+                      {(analysisData.lighting as Record<string,unknown>).temperature && <li>• Temperatura: {String((analysisData.lighting as Record<string,unknown>).temperature)} ({String((analysisData.lighting as Record<string,unknown>).temperatureKelvin || "?")}K)</li>}
+                      {(analysisData.lighting as Record<string,unknown>).gradient && <li>• Gradient: {String((analysisData.lighting as Record<string,unknown>).gradient)}</li>}
+                      {(analysisData.lighting as Record<string,unknown>).shadowType && <li>• Cienie: {String((analysisData.lighting as Record<string,unknown>).shadowType)}</li>}
+                    </ul>
+                  </div>
+                )}
+                {analysisData.perspective && typeof analysisData.perspective === 'object' && (analysisData.perspective as Record<string,unknown>).type && (
+                  <p>📷 Perspektywa: {String((analysisData.perspective as Record<string,unknown>).type)} (~{String((analysisData.perspective as Record<string,unknown>).angleDeg || 0)}°)</p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      <p className="text-sm font-semibold text-stone-700">Tworzymy wizualizację</p>
-      <p className="text-xs text-stone-400 mt-1">AI pracuje nad realistycznym renderem</p>
-      {progress && <p className="text-[11px] text-stone-500 mt-3 font-medium bg-stone-100 px-3 py-1 rounded-full">{progress}</p>}
     </div>
   );
 }
@@ -289,6 +440,8 @@ export default function Home() {
   const [mobileProductOpen, setMobileProductOpen] = useState(false);
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number; unlimited: boolean } | null>(null);
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
+  const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(INITIAL_STAGES);
+  const [debugOpen, setDebugOpen] = useState(false);
 
   const fetchRemaining = useCallback(() => {
     fetch(`${API_BASE}/api/remaining-generations`)
@@ -387,26 +540,114 @@ export default function Home() {
     setPipelineError(null);
     setRenderData(null);
     setGenProgress("Przygotowywanie obrazu…");
+    setPipelineStages(INITIAL_STAGES.map(s => ({ ...s, status: "pending" as const })));
+    setDebugOpen(false);
+
     try {
       const imageBase64 = await prepareImageForUpload(imageSrc);
-      setGenProgress("Nakładanie tekstury + AI render…");
+      setGenProgress("Łączenie z serwerem…");
       const polygon = rectToPolygon(rectPts);
-      const res = await fetchWithRetry(`${API_BASE}/api/render-final`, {
+
+      const res = await fetch(`${API_BASE}/api/render-stream`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: imageBase64, polygon, product_id: selectedProduct.productId, canvas_width: stageSize.width, canvas_height: stageSize.height }),
-      }, 3);
-      if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(formatFastApiError(err) || `Server error ${res.status}`); }
-      const data = await res.json();
-      setRenderData({ composite: data.composite || null, refined: data.refined || data.composite || null, geminiModel: data.gemini_model || "unknown", timings: data.timings || {}, scale: data.scale || undefined });
-      setResultTab("final");
-      setStage("generated");
-      fetchRemaining();
+        body: JSON.stringify({
+          image: imageBase64,
+          polygon,
+          product_id: selectedProduct.productId,
+          canvas_width: stageSize.width,
+          canvas_height: stageSize.height,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(formatFastApiError(err) || `Server error ${res.status}`);
+      }
+
+      // Read SSE stream
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalAnalysis: Record<string, unknown> | undefined;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+          let evt: Record<string, unknown>;
+          try {
+            evt = JSON.parse(line.slice(6));
+          } catch { continue; }
+
+          const stageId = evt.stage as string;
+          const status = evt.status as PipelineStage["status"] | undefined;
+
+          // Handle final "done" event
+          if (stageId === "done") {
+            const result = evt.result as Record<string, unknown> | undefined;
+            if (result) {
+              setRenderData({
+                composite: (result.composite as string) || null,
+                refined: (result.refined as string) || (result.composite as string) || null,
+                geminiModel: (result.gemini_model as string) || "unknown",
+                timings: (result.timings as Record<string, number>) || {},
+                analysis: (result.analysis as Record<string, unknown>) || finalAnalysis,
+              });
+              setResultTab("final");
+              setStage("generated");
+              fetchRemaining();
+            } else if (evt.ok === false) {
+              throw new Error((evt.error as string) || "Pipeline failed");
+            }
+            continue;
+          }
+
+          // Handle mask_refine (not in the main list)
+          if (stageId === "mask_refine") continue;
+
+          // Save analysis data if present
+          if (evt.analysis) {
+            finalAnalysis = evt.analysis as Record<string, unknown>;
+          }
+
+          // Update stage status
+          if (status) {
+            setPipelineStages(prev => prev.map(s =>
+              s.id === stageId
+                ? {
+                    ...s,
+                    status,
+                    timing: evt.timing as number | undefined,
+                    detail: evt.detail as string | undefined,
+                    error: evt.error as string | undefined,
+                    message: evt.message as string | undefined,
+                    analysis: evt.analysis as Record<string, unknown> | undefined ?? s.analysis,
+                  }
+                : s
+            ));
+            // Update progress text
+            if (status === "running" && evt.message) {
+              setGenProgress(evt.message as string);
+            }
+          }
+        }
+      }
     } catch (e) {
       setPipelineError(e instanceof Error ? e.message : "Generowanie nie powiodło się");
       setStage("edit");
-    } finally { setGenProgress(""); }
-  }, [imageSrc, canGenerate, selectedProduct, stageSize, rectPts, fetchWithRetry, fetchRemaining]);
+    } finally {
+      setGenProgress("");
+    }
+  }, [imageSrc, canGenerate, selectedProduct, stageSize, rectPts, fetchRemaining]);
 
   const handleUseResultAsInput = useCallback(() => {
     if (!renderData?.refined) return;
@@ -618,7 +859,7 @@ export default function Home() {
                     </ErrorBoundary>
                   )}
 
-                  {stage === "rendering" && <LoadingOverlay progress={genProgress} />}
+                  {stage === "rendering" && <PipelineStatusPanel stages={pipelineStages} isOverlay />}
 
                   {stage === "generated" && renderData && (
                     <div className="flex flex-col gap-3 sm:gap-4 animate-scale-in">
@@ -651,7 +892,7 @@ export default function Home() {
                         </div>
                       )}
 
-                      {/* Product + scale info */}
+                      {/* Product info */}
                       {selectedProduct && (
                         <div className="flex items-start gap-3 px-1">
                           <img src={`/api/textures/${selectedProduct.productId}`} alt="" className="w-10 h-10 rounded-lg object-cover border border-stone-200 mt-0.5" />
@@ -659,22 +900,41 @@ export default function Home() {
                             <p className="text-xs font-semibold text-stone-700">{selectedProduct.name}</p>
                             <p className="text-[10px] text-stone-400">
                               Moduł: {selectedProduct.moduleWidthMm}×{selectedProduct.moduleHeightMm}mm
+                              {renderData?.timings?.total && <> · {renderData.timings.total}s</>}
+                              {renderData?.geminiModel && <> · {renderData.geminiModel}</>}
                             </p>
-                            {renderData?.scale && (
-                              <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-stone-400">
-                                <span>Ściana: ~{renderData.scale.wallHeightCm}×{renderData.scale.wallWidthCm} cm</span>
-                                <span>Rzędy: ~{renderData.scale.courses}</span>
-                                <span>Szt./rząd: ~{renderData.scale.unitsPerRow}</span>
-                                {renderData.scale.referenceObjects.length > 0 && (
-                                  <span className="text-[#A01B1B]/60">
-                                    Ref: {renderData.scale.referenceObjects.join(", ")}
-                                  </span>
-                                )}
-                              </div>
-                            )}
                           </div>
                         </div>
                       )}
+
+                      {/* Pipeline debug panel */}
+                      <div className="border border-stone-200 rounded-xl overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setDebugOpen(!debugOpen)}
+                          className="w-full flex items-center justify-between px-3 py-2 bg-stone-50 hover:bg-stone-100 transition-colors cursor-pointer"
+                        >
+                          <span className="flex items-center gap-2 text-[11px] font-semibold text-stone-600">
+                            <span>📊</span>
+                            <span>Szczegóły pipeline</span>
+                            {pipelineStages.some(s => s.status === "error") && (
+                              <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-red-100 text-red-600 rounded">BŁĘDY</span>
+                            )}
+                            {pipelineStages.some(s => s.status === "warning") && !pipelineStages.some(s => s.status === "error") && (
+                              <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-600 rounded">OSTRZEŻENIA</span>
+                            )}
+                          </span>
+                          <span className="text-[10px] text-stone-400">
+                            {renderData?.timings?.total && `${renderData.timings.total}s · `}
+                            {debugOpen ? "▲" : "▼"}
+                          </span>
+                        </button>
+                        {debugOpen && (
+                          <div className="border-t border-stone-100 py-2">
+                            <PipelineStatusPanel stages={pipelineStages} />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

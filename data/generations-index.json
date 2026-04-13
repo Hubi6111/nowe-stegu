@@ -1,5 +1,197 @@
 [
   {
+    "id": "20260413-173649-79dc77",
+    "timestamp": "2026-04-13 17:36:49",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.29,
+      "analysis": 13.75,
+      "retile": 0.29,
+      "render": 23.07,
+      "verify": 23.84,
+      "total": 61.53
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-172648-eefba9",
+    "timestamp": "2026-04-13 17:26:48",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.3,
+      "analysis": 79.67,
+      "retile": 0.31,
+      "render": 16.94,
+      "verify": 8.16,
+      "total": 105.67
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-171418-2f4c35",
+    "timestamp": "2026-04-13 17:14:18",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.03,
+      "texture": 0.41,
+      "analysis": 23.32,
+      "retile": 0.34,
+      "render": 28.47,
+      "verify": 50.65,
+      "total": 103.51
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-165820-e04cc2",
+    "timestamp": "2026-04-13 16:58:20",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.33,
+      "scene_analysis": 28.21,
+      "retile": 0.31,
+      "render": 31.72,
+      "verification": 115.37,
+      "gemini_total": 175.77,
+      "total": 176.13
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-164016-1a286d",
+    "timestamp": "2026-04-13 16:40:16",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "texture_project": 0.34,
+      "scene_analysis": 64.87,
+      "retile": 0.29,
+      "render": 50.51,
+      "verification": 59.28,
+      "gemini_total": 175.07,
+      "total": 175.45
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-155144-9de022",
+    "timestamp": "2026-04-13 15:51:44",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.33,
+      "scene_analysis": 1.03,
+      "retile": 0.31,
+      "render": 1.08,
+      "gemini_total": 2.42,
+      "total": 2.83
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-154914-0a4326",
+    "timestamp": "2026-04-13 15:49:14",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.34,
+      "scene_analysis": 1.39,
+      "retile": 0.32,
+      "render": 1.28,
+      "gemini_total": 2.99,
+      "total": 3.4
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-154716-3df21f",
+    "timestamp": "2026-04-13 15:47:16",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.34,
+      "scene_analysis": 3.15,
+      "retile": 0.33,
+      "render": 7.12,
+      "gemini_total": 10.6,
+      "total": 10.97
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-154338-15715d",
+    "timestamp": "2026-04-13 15:43:38",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.36,
+      "scene_analysis": 8.56,
+      "retile": 0.35,
+      "render": 59.9,
+      "gemini_total": 68.81,
+      "total": 69.23
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-153901-9de3eb",
+    "timestamp": "2026-04-13 15:39:01",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.36,
+      "scene_analysis": 8.43,
+      "retile": 0.35,
+      "render": 35.0,
+      "gemini_total": 43.78,
+      "total": 44.19
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-030448-fd475c",
+    "timestamp": "2026-04-13 03:04:48",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "no-image-output",
+    "timings": {
+      "texture_project": 0.38,
+      "scene_analysis": 74.05,
+      "retile": 0.3,
+      "render": 22.09,
+      "gemini_total": 96.45,
+      "total": 96.89
+    },
+    "has_image": true
+  },
+  {
     "id": "20260413-005425-57e509",
     "timestamp": "2026-04-13 00:54:25",
     "client_ip": "127.0.0.1",
