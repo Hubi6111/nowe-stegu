@@ -462,7 +462,11 @@ def _sse(data: dict) -> str:
 
 @router.post("/api/render-stream")
 async def render_stream(req: RenderFinalRequest, request: Request):
-    """Full rendering pipeline with SSE real-time progress events."""
+    """Simplified 3-stage pipeline: DECODE → TEXTURE → AI RENDER.
+
+    The AI render handles everything in one pass: scale verification,
+    foreground masking, lighting integration, boundary trimming.
+    """
     client_ip = _get_client_ip(request)
     allowed, used, limit = check_rate_limit(client_ip)
     if not allowed:
@@ -474,9 +478,8 @@ async def render_stream(req: RenderFinalRequest, request: Request):
     def _pipeline():
         t0 = time.time()
         timings: dict = {}
-        analysis_summary: dict = {}
 
-        # ── Stage: Decode inputs ──────────────────────────────────────────
+        # ── Stage 1: Decode inputs ────────────────────────────────────────
         yield _sse({"stage": "decode", "status": "running",
                      "message": "Dekodowanie obrazu…"})
         try:
@@ -499,7 +502,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             yield _sse({"stage": "done", "ok": False, "error": str(exc)})
             return
 
-        # ── Stage: Texture projection ─────────────────────────────────────
+        # ── Stage 2: Texture projection (deterministic, no AI) ────────────
         t1 = time.time()
         yield _sse({"stage": "texture", "status": "running",
                      "message": "Projekcja tekstury na ścianę…"})
@@ -522,12 +525,10 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             image, final_mask, alpha=0.55, max_long_side=2048
         )
 
-        # No Gemini key — skip AI stages
+        # No Gemini key — return composite as-is
         if not os.environ.get("GEMINI_API_KEY"):
-            yield _sse({"stage": "analysis", "status": "skipped",
+            yield _sse({"stage": "render", "status": "skipped",
                          "message": "Brak klucza GEMINI_API_KEY"})
-            yield _sse({"stage": "render", "status": "skipped"})
-            yield _sse({"stage": "verify", "status": "skipped"})
             timings["total"] = round(time.time() - t0, 2)
             yield _sse({"stage": "done", "ok": True,
                 "result": {"composite": composite_b64, "refined": composite_b64,
@@ -539,93 +540,10 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             "materialType", meta.get("layoutType", "decorative stone/brick")
         )
 
-        # ── Stage: Scene analysis (AI) ────────────────────────────────────
+        # ── Stage 3: AI Render (one-shot — does everything) ───────────────
         t2 = time.time()
-        yield _sse({"stage": "analysis", "status": "running",
-                     "message": "Analiza sceny — pomiary, oświetlenie, przeszkody (Gemini)…"})
-        analysis: dict = {}
-        try:
-            analysis = analyze_wall_scene(image, composite, mask_overlay)
-            td = round(time.time() - t2, 2)
-            timings["analysis"] = td
-
-            # Build rich summary for frontend
-            analysis_summary = {
-                "wallHeightCm": analysis.get("wallHeightCm"),
-                "wallWidthCm": analysis.get("wallWidthCm"),
-                "ceilingHeightCm": analysis.get("ceilingHeightCm"),
-                "confidence": analysis.get("confidence"),
-                "measurementMethod": analysis.get("measurementMethod"),
-                "textureScaleCorrect": analysis.get("textureScaleCorrect"),
-                "scaleNote": analysis.get("scaleNote"),
-                "referenceObjects": [
-                    {"name": r.get("name"), "realHeightCm": r.get("realHeightCm"),
-                     "pxPerCm": r.get("pxPerCm"), "confidence": r.get("confidence")}
-                    for r in analysis.get("referenceObjects", [])
-                ],
-                "occluders": [o.get("label") for o in analysis.get("occluders", [])],
-                "wallBoundaries": analysis.get("wallBoundaries"),
-                "lighting": {
-                    k: analysis.get("lighting", {}).get(k)
-                    for k in ("primarySource", "temperature", "temperatureKelvin",
-                              "gradient", "gradientIntensity", "shadowType",
-                              "shadowIntensity", "colorCast", "exposure")
-                },
-                "perspective": analysis.get("perspective", {}),
-            }
-
-            conf = analysis.get("confidence", "?")
-            wh = analysis.get("wallHeightCm", "?")
-            ww = analysis.get("wallWidthCm", "?")
-            refs = [r.get("name") for r in analysis.get("referenceObjects", [])]
-            occ = [o.get("label") for o in analysis.get("occluders", [])]
-            yield _sse({
-                "stage": "analysis", "status": "done", "timing": td,
-                "detail": f"Ściana: {wh}×{ww} cm · pewność: {conf}",
-                "analysis": analysis_summary,
-            })
-        except Exception as exc:
-            td = round(time.time() - t2, 2)
-            timings["analysis"] = td
-            yield _sse({"stage": "analysis", "status": "error",
-                         "error": str(exc), "timing": td})
-
-        # ── Mask refinement with wall boundaries ──────────────────────────
-        wall_boundaries = analysis.get("wallBoundaries")
-        if wall_boundaries:
-            refined = refine_mask_with_boundaries(final_mask, wall_boundaries)
-            if refined.any() and not np.array_equal(refined, final_mask):
-                trimmed = int(final_mask.sum() - refined.sum())
-                final_mask = refined
-                yield _sse({"stage": "mask_refine", "status": "done",
-                             "detail": f"Przycięto maskę: {trimmed} px"})
-
-        # ── Re-tile with AI-calibrated dimensions ─────────────────────────
-        t_retile = time.time()
-        yield _sse({"stage": "retile", "status": "running",
-                     "message": "Ponowne kafelkowanie z kalibracją AI…"})
-        try:
-            composite = project_texture(
-                image, final_mask, texture, meta=meta,
-                polygon=scaled_polygon, analysis=analysis,
-            )
-            composite_b64 = image_to_b64(composite)
-            mask_overlay = render_mask_overlay(
-                image, final_mask, alpha=0.55, max_long_side=2048
-            )
-            td = round(time.time() - t_retile, 2)
-            timings["retile"] = td
-            yield _sse({"stage": "retile", "status": "done", "timing": td})
-        except Exception as exc:
-            td = round(time.time() - t_retile, 2)
-            timings["retile"] = td
-            yield _sse({"stage": "retile", "status": "warning",
-                         "error": str(exc), "timing": td})
-
-        # ── Stage: Photorealistic render (AI) ─────────────────────────────
-        t3 = time.time()
         yield _sse({"stage": "render", "status": "running",
-                     "message": "Renderowanie fotorealistyczne (Gemini)…"})
+                     "message": "Renderowanie AI — analiza sceny, maskowanie, oświetlenie (Gemini)…"})
         raw_rendered = None
         try:
             raw_rendered = generate_photorealistic_render(
@@ -634,11 +552,11 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 mask_overlay=mask_overlay,
                 product_name=product_name,
                 product_texture=texture,
-                analysis=analysis,
+                analysis=None,
                 material_type=material_type,
                 product_meta=meta,
             )
-            td = round(time.time() - t3, 2)
+            td = round(time.time() - t2, 2)
             timings["render"] = td
             if raw_rendered:
                 yield _sse({"stage": "render", "status": "done", "timing": td,
@@ -647,62 +565,18 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 yield _sse({"stage": "render", "status": "warning", "timing": td,
                              "error": "Gemini nie zwrócił obrazu"})
         except Exception as exc:
-            td = round(time.time() - t3, 2)
+            td = round(time.time() - t2, 2)
             timings["render"] = td
             yield _sse({"stage": "render", "status": "error",
                          "error": str(exc), "timing": td})
 
-        if not raw_rendered:
-            # Fall back to composite
-            increment_usage(client_ip)
-            timings["total"] = round(time.time() - t0, 2)
-            yield _sse({"stage": "verify", "status": "skipped",
-                         "message": "Pominięto — brak obrazu z rendera"})
-            yield _sse({"stage": "done", "ok": True,
-                "result": {"composite": composite_b64, "refined": composite_b64,
-                           "gemini_model": "no-image-output",
-                           "timings": timings, "analysis": analysis_summary}})
-            return
-
-        # Clip render to mask
-        stage2_output = masked_composite(
-            image, raw_rendered, final_mask, feather_radius=3
-        )
-
-        # ── Stage: Verification & correction (AI) ────────────────────────
-        t4 = time.time()
-        skip_verify = os.environ.get("SKIP_VERIFICATION", "").lower() in ("1", "true")
-        final_output = stage2_output
-
-        if not skip_verify:
-            yield _sse({"stage": "verify", "status": "running",
-                         "message": "Weryfikacja i korekta — przeszkody, granice, oświetlenie (Gemini)…"})
-            try:
-                verified = verify_and_correct_render(
-                    original=image,
-                    rendered=stage2_output,
-                    mask_overlay=mask_overlay,
-                    product_texture=texture,
-                )
-                td = round(time.time() - t4, 2)
-                timings["verify"] = td
-                if verified:
-                    final_output = masked_composite(
-                        image, verified, final_mask, feather_radius=3
-                    )
-                    yield _sse({"stage": "verify", "status": "done", "timing": td,
-                                 "detail": "Skorygowano"})
-                else:
-                    yield _sse({"stage": "verify", "status": "warning", "timing": td,
-                                 "error": "Weryfikacja nie zwróciła obrazu"})
-            except Exception as exc:
-                td = round(time.time() - t4, 2)
-                timings["verify"] = td
-                yield _sse({"stage": "verify", "status": "error",
-                             "error": str(exc), "timing": td})
+        # Build final output
+        if raw_rendered:
+            final_output = masked_composite(
+                image, raw_rendered, final_mask, feather_radius=3
+            )
         else:
-            yield _sse({"stage": "verify", "status": "skipped",
-                         "message": "Pominięto (SKIP_VERIFICATION=true)"})
+            final_output = composite
 
         # ── Watermark ─────────────────────────────────────────────────────
         refined_b64 = image_to_b64(final_output)
@@ -744,7 +618,6 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                 "refined": refined_b64,
                 "gemini_model": image_model_name(),
                 "timings": timings,
-                "analysis": analysis_summary,
                 "image_width": image.width,
                 "image_height": image.height,
             }})

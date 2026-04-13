@@ -673,48 +673,50 @@ def _build_dimension_instructions(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RENDER_PROMPT_TEMPLATE = """\
-You are a photo compositing tool. You combine two images into one.
+You are a photo compositing tool. You receive 4 images and produce \
+one photorealistic result.
 
-IMAGE 1 — ORIGINAL: The unmodified room photograph.
+IMAGE 1 — ORIGINAL: The unmodified room photograph (ground truth).
 IMAGE 2 — COMPOSITE: The same photo with "{product_name}" ({material_type}) \
-texture already precisely mapped onto the wall. This texture is FINAL.
+texture already mapped onto the wall. The texture placement is pre-computed.
 IMAGE 3 — MASK: Shows the wall area with an ORANGE overlay.
 IMAGE 4 — PRODUCT TEXTURE: A close-up tile/swatch of the selected product. \
-Use this as COLOR and DETAIL reference — the wall texture in the COMPOSITE \
-must look exactly like this material. Preserve its colors, grain, and surface.
+This is your COLOR and DETAIL reference.
 
-CRITICAL: Your output must be 95% identical to IMAGE 2 (the COMPOSITE). \
-You are making ONLY these minimal corrections:
+STEP 1: ANALYZE THE WHOLE SCENE
+Before editing, look at the ENTIRE IMAGE 1 to understand the room:
+  • Find reference objects: doors (~200cm), windows, light switches (~115cm), \
+power outlets (~30cm), furniture, people — use them to understand scale
+  • Note the lighting direction, color temperature, and shadows
+  • Identify ALL objects in front of the wall (furniture, TV, plants, etc.)
+  • Determine where the wall surface ends (ceiling junction, floor/baseboard, \
+corners, door/window frames)
 
-1. RESTORE FOREGROUND OBJECTS — Look at IMAGE 1 (ORIGINAL). Any object \
-that is physically IN FRONT of the wall (furniture, TV, shelves, plants, \
-lamps, frames, switches, cables, curtains, people) must appear ON TOP \
-of the texture. Copy these objects pixel-for-pixel from the ORIGINAL \
-and layer them over the COMPOSITE. The texture goes BEHIND them.
+STEP 2: PRODUCE THE FINAL IMAGE
+Start from IMAGE 2 (COMPOSITE) and apply these corrections:
+
+1. RESTORE FOREGROUND OBJECTS — Copy pixel-for-pixel from IMAGE 1 any \
+object that is IN FRONT of the wall. The texture goes BEHIND them.
 {occluder_list}
 
-2. TRIM WALL BOUNDARIES — If the texture extends beyond the actual wall \
-surface (onto ceiling, floor, adjacent walls, baseboards, door frames), \
-replace those areas with the ORIGINAL image pixels. The texture covers \
-ONLY the flat wall surface.
+2. TRIM WALL BOUNDARIES — If texture extends beyond the wall onto ceiling, \
+floor, adjacent walls, baseboards, or door frames — replace with ORIGINAL.
 
-3. SUBTLE LIGHTING — Very slightly adjust the texture brightness to match \
-the ORIGINAL's lighting direction. This should be barely noticeable — \
-do NOT dramatically change the texture colors or brightness. The texture \
-colors must still match IMAGE 4 (PRODUCT TEXTURE) closely.
+3. MATCH LIGHTING — Very subtly adjust texture brightness to match IMAGE 1. \
+Keep the same gradient direction and color temperature. This should be \
+barely noticeable — preserve the texture colors from IMAGE 4.
 
-ABSOLUTE RULES:
-⛔ Do NOT re-draw, re-tile, re-generate, or re-imagine the texture
-⛔ Do NOT change the texture scale, pattern, count, or spacing
-⛔ Do NOT change texture colors — they must match IMAGE 4 (PRODUCT TEXTURE)
-⛔ Do NOT zoom, crop, pan, or change the resolution
-⛔ Keep everything outside the wall IDENTICAL to the ORIGINAL
-⛔ Keep the wall texture IDENTICAL to the COMPOSITE except for the \
-3 corrections above
+4. VERIFY SCALE — Check that the texture elements in the COMPOSITE look \
+physically correct relative to the reference objects you identified. \
+The texture scale in the COMPOSITE is pre-computed from real millimetre \
+dimensions, so it should be correct — trust it. If it looks right, \
+keep it exactly as-is.
 
-Think of it this way: you are doing a Photoshop layer operation. \
-The COMPOSITE is the bottom layer. You cut out foreground objects \
-from the ORIGINAL and paste them on top. That is ALL you do.
+CRITICAL: Output must be 95% identical to IMAGE 2 (COMPOSITE).
+⛔ Do NOT re-draw, re-tile, or re-imagine the texture
+⛔ Do NOT change texture scale, pattern, count, or spacing
+⛔ Do NOT zoom, crop, or change resolution
+⛔ Everything outside the wall = IDENTICAL to IMAGE 1
 
 Output ONLY the final image. No text.
 """
