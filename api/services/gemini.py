@@ -673,65 +673,42 @@ def _build_dimension_instructions(
 # ══════════════════════════════════════════════════════════════════════════════
 
 _RENDER_PROMPT_TEMPLATE = """\
-You are a professional photo compositor. You receive 3 images:
+You receive 3 images. Produce one photorealistic result.
 
-IMAGE 1 — "BEZ AI" (COMPOSITE): The original room photo with "{product_name}" \
-({material_type}) texture provisionally laid onto one wall. This defines \
-the EXACT SIZE, SCALE, POSITION, and TILING of the texture. The texture \
-dimensions in this image are FINAL — do not change them at all.
+IMAGE 1 — "BEZ AI": Room photo with "{product_name}" ({material_type}) \
+texture already placed on the wall. The texture position, size, scale, \
+and tiling are CORRECT. Use this as your BASE.
 
-IMAGE 2 — ORIGINAL: The unmodified room photograph. This is your reference \
-for lighting, shadows, color temperature, and all objects/surfaces.
+IMAGE 2 — ORIGINAL: The same room WITHOUT the texture. Use this for:
+  • Lighting and shadows reference
+  • All objects that should appear IN FRONT of the texture
+  • All surfaces that are NOT the wall (ceiling, floor, other walls)
 
-IMAGE 3 — PRODUCT TEXTURE: A close-up tile/swatch of "{product_name}". \
-This defines the EXACT APPEARANCE of the texture — colors, grain, surface \
-detail, 3D relief, material look. The texture on the wall must look \
-IDENTICAL to this swatch.
+IMAGE 3 — TEXTURE SWATCH: Close-up photo of the actual "{product_name}" \
+material. This is what the texture should LOOK LIKE on the wall.
 
-TWO CRITICAL 1:1 RULES:
-  ★ APPEARANCE 1:1 with IMAGE 3 — The texture on the wall must reproduce \
-the exact same colors, grain pattern, surface detail, and material look \
-as shown in IMAGE 3 (product texture). Every brick, slat, stone, or \
-plank must look exactly like the swatch.
-  ★ SIZE 1:1 with IMAGE 1 — The texture scale, tile count, element \
-spacing, and overall dimensions must be EXACTLY the same as in IMAGE 1 \
-(the "Bez AI" composite). Count the elements (bricks/slats/planks) in \
-IMAGE 1 — your output must have the SAME count in the SAME positions.
+WHAT TO DO:
+  1. Start from IMAGE 1 (the "Bez AI" composite)
+  2. The texture is already in the right place and at the right size — \
+KEEP IT EXACTLY THERE, do not move or resize it
+  3. Make the texture look like IMAGE 3 — same colors, same grain, \
+same surface detail
+  4. Apply the lighting from IMAGE 2 subtly (slight brightness changes \
+only — do NOT change the texture colors)
+  5. Put back ALL objects that are in front of the wall — copy them \
+from IMAGE 2: furniture, TV, shelves, plants, lamps, switches, frames, \
+cables, people — everything that was between the camera and the wall
+  6. Make sure the texture does NOT cover the ceiling, floor, other walls, \
+baseboards, door frames, or window frames — those must look like IMAGE 2
 
-YOUR TASK: Create a photorealistic photograph where the texture looks \
-physically installed on the wall.
+RULES:
+  ⛔ Texture SIZE and POSITION = exactly like IMAGE 1
+  ⛔ Texture APPEARANCE = exactly like IMAGE 3
+  ⛔ Everything that is NOT the textured wall = exactly like IMAGE 2
+  ⛔ Do NOT crop, zoom, resize, or change the framing
+  ⛔ Do NOT re-tile or re-draw the texture
 
-STEP 1 — ANALYZE (look at IMAGE 2):
-  • Lighting: direction, intensity, color temperature, shadows
-  • Objects IN FRONT of the wall: furniture, TV, shelves, plants, lamps, \
-frames, switches, cables, curtains, people
-  • Wall boundaries: ceiling, floor/baseboard, corners, door/window frames
-
-STEP 2 — COMPOSE THE TEXTURE:
-  • Use IMAGE 1 as your base — keep the texture exactly where it is, \
-at exactly the same size
-  • Make the texture look like IMAGE 3 — same colors, same grain, \
-same surface detail, same material quality
-  • Apply the room's lighting from IMAGE 2 SUBTLY — only slight \
-brightness/shadow adjustments, NOT color changes
-  • Add natural contact shadows where furniture meets the wall
-  • Add ambient occlusion at ceiling/floor/corner junctions
-
-STEP 3 — RESTORE FOREGROUND:
-  • Every object IN FRONT of the wall in IMAGE 2 must appear ON TOP \
-of the texture — copy them pixel-perfectly from IMAGE 2
-  • Texture must NOT cover ceiling, floor, adjacent walls, baseboards, \
-crown molding, door/window frames
-  • Everything outside the textured area = IDENTICAL to IMAGE 2
-
-ABSOLUTE RULES:
-  ⛔ Do NOT change the texture SIZE — it must match IMAGE 1 exactly
-  ⛔ Do NOT change the texture LOOK — it must match IMAGE 3 exactly
-  ⛔ Do NOT re-tile, re-scale, re-draw, or re-imagine the texture
-  ⛔ Do NOT change resolution, framing, or aspect ratio
-  ⛔ Do NOT crop or zoom
-
-Output ONLY the final image. No text.
+Output ONLY the image. No text.
 """
 
 
