@@ -4,7 +4,7 @@
   "materialType": "decorative wood lamel panel",
   "tileWidthMm": 240,
   "tileHeightMm": 480,
-  "moduleWidthMm": 240,
+  "moduleWidthMm": 30,
   "moduleHeightMm": 480,
   "jointMm": 30,
   "layoutType": "vertical-stack",
