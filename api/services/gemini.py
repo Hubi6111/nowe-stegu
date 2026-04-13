@@ -680,11 +680,28 @@ texture overlaid on the wall. Shows exact texture position, size, and tiling.
 
 IMAGE 2 — ORIGINAL: The room without any texture.
 
-IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material.
+IMAGE 3 — TEXTURE SWATCH: Close-up of the "{product_name}" material. \
+Shows the exact shape, color, spacing, and proportions of the elements.
 
 CREATE: The ORIGINAL photo (IMAGE 2) with the texture placed on the wall \
-exactly like in IMAGE 1 ("Bez AI") — same position, same size, same tiling. \
-The texture must look like IMAGE 3 (same colors, grain, detail).
+exactly like in IMAGE 1 ("Bez AI") — same position, same size, same tiling.
+
+TEXTURE FIDELITY — match IMAGE 3 exactly:
+  • Same colors and material look
+  • Same element shape and proportions (e.g. panel width, slat spacing, \
+brick dimensions — every element must match IMAGE 3)
+  • Same spacing between elements — if slats are evenly spaced in IMAGE 3, \
+they must be evenly spaced in the result
+  • The texture must be SEAMLESS — no visible seams, joints, or repetition \
+artifacts where tiles meet. It should look like one continuous surface.
+
+LIGHTING — match IMAGE 2 naturally:
+  • Apply the same light direction, intensity, and color temperature \
+as in the ORIGINAL photo
+  • Add subtle shadows and gradients matching the room's ambient light
+  • Where furniture is close to the wall, add natural contact shadows
+  • The texture should look like it's physically part of the room, \
+lit by the same light sources
 
 The texture must NOT cover anything that is not the wall surface:
   • Furniture, TV, shelves, plants, lamps, frames, switches, cables, \
@@ -696,7 +713,7 @@ Only the wall surface gets the texture. Everything else = IMAGE 2 exactly.
 
 ⛔ Do NOT change texture size/position from IMAGE 1
 ⛔ Do NOT crop, zoom, or resize
-⛔ Do NOT re-tile or re-draw the texture
+⛔ Do NOT re-tile or re-draw the texture pattern differently
 
 Output ONLY the image.
 """

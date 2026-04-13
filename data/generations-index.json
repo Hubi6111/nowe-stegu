@@ -1,5 +1,35 @@
 [
   {
+    "id": "20260413-203334-f40d9c",
+    "timestamp": "2026-04-13 20:33:34",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.31,
+      "render": 16.93,
+      "total": 17.39
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260413-203221-dcf05b",
+    "timestamp": "2026-04-13 20:32:21",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "gemini-3-pro-image-preview",
+    "timings": {
+      "decode": 0.02,
+      "texture": 0.32,
+      "render": 24.59,
+      "total": 25.09
+    },
+    "has_image": true
+  },
+  {
     "id": "20260413-202035-828ec9",
     "timestamp": "2026-04-13 20:20:35",
     "client_ip": "127.0.0.1",
