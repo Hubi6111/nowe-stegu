@@ -119,6 +119,7 @@ class RenderFinalRequest(BaseModel):
     product_id: str
     canvas_width: float
     canvas_height: float
+    calibration: dict | None = None
 
 
 class WallDetectRequest(BaseModel):
@@ -249,6 +250,7 @@ async def smart_mask(req: DetectMaskRequest):
             "wall_model": "cv-engine (SegFormer+SAM2+GDINO)",
             "image_width": image.width,
             "image_height": image.height,
+            "calibration": cv_result.get("calibration"),
             "timings": {
                 **cv_result.get("timings", {}),
                 "proxy": round(time.time() - t0, 2),
@@ -446,8 +448,27 @@ async def render_stream(req: RenderFinalRequest, request: Request):
                      "message": "Projekcja tekstury na ścianę…"})
         try:
             meta, texture = load_product(req.product_id)
+
+            # Build analysis from calibration data (precise px_per_cm)
+            analysis = None
+            if req.calibration and req.calibration.get("px_per_cm"):
+                px_per_cm = req.calibration["px_per_cm"]
+                wall_h_cm = req.calibration.get("wall_height_cm", 270)
+                analysis = {
+                    "wallHeightCm": wall_h_cm,
+                    "px_per_cm": px_per_cm,
+                    "confidence": req.calibration.get("confidence", "medium"),
+                    "calibration_method": req.calibration.get("method", "unknown"),
+                    "references": req.calibration.get("references", []),
+                }
+                logger.info(
+                    "Using CV calibration: px/cm=%.3f, wall=%.0fcm (%s)",
+                    px_per_cm, wall_h_cm, analysis["confidence"],
+                )
+
             composite = project_texture(
-                image, final_mask, texture, meta=meta, polygon=scaled_polygon
+                image, final_mask, texture, meta=meta,
+                polygon=scaled_polygon, analysis=analysis,
             )
             composite_b64 = image_to_b64(composite)
 

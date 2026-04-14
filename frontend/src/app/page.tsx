@@ -549,6 +549,7 @@ export default function Home() {
       setGenProgress("Wykrywanie ściany…");
 
       let confirmedMask: string | null = null;
+      let calibrationData: Record<string, unknown> | null = null;
       try {
         const maskRes = await fetch(`${API_BASE}/api/smart-mask`, {
           method: "POST",
@@ -564,10 +565,14 @@ export default function Home() {
         if (maskRes.ok) {
           const maskData = await maskRes.json();
           confirmedMask = maskData.final_mask || maskData.wall_mask;
+          calibrationData = maskData.calibration || null;
           const timing = maskData.timings?.total;
           const model = maskData.wall_model || "cv-engine";
+          const calInfo = calibrationData
+            ? ` | ${(calibrationData as { px_per_cm?: number }).px_per_cm?.toFixed(2)} px/cm (${(calibrationData as { confidence?: string }).confidence})`
+            : "";
           setPipelineStages(prev => prev.map(s => s.id === "mask"
-            ? { ...s, status: "done", timing, detail: model }
+            ? { ...s, status: "done", timing, detail: model + calInfo }
             : s
           ));
         } else {
@@ -595,6 +600,7 @@ export default function Home() {
           image: imageBase64,
           polygon,
           confirmed_mask: confirmedMask,
+          calibration: calibrationData,
           product_id: selectedProduct.productId,
           canvas_width: stageSize.width,
           canvas_height: stageSize.height,

@@ -1,5 +1,145 @@
 [
   {
+    "id": "20260414-022900-aeb212",
+    "timestamp": "2026-04-14 02:29:00",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.35,
+      "total": 0.36
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-022826-ce0383",
+    "timestamp": "2026-04-14 02:28:26",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.32,
+      "total": 0.34
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-022454-c94a2d",
+    "timestamp": "2026-04-14 02:24:54",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.3,
+      "total": 0.32
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-022206-8d5ce2",
+    "timestamp": "2026-04-14 02:22:06",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.36,
+      "total": 0.38
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-021757-779ae9",
+    "timestamp": "2026-04-14 02:17:57",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.39,
+      "total": 0.43
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-021638-b9fd4d",
+    "timestamp": "2026-04-14 02:16:38",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.31,
+      "total": 0.33
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-020810-b1d3f6",
+    "timestamp": "2026-04-14 02:08:10",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.36,
+      "total": 0.37
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-020723-32d7a6",
+    "timestamp": "2026-04-14 02:07:23",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.34,
+      "total": 0.35
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-020705-06abcd",
+    "timestamp": "2026-04-14 02:07:05",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.3,
+      "total": 0.31
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-020602-3ae2f3",
+    "timestamp": "2026-04-14 02:06:02",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.29,
+      "total": 0.31
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-020306-b326e3",
     "timestamp": "2026-04-14 02:03:06",
     "client_ip": "127.0.0.1",

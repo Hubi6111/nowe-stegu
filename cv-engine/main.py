@@ -26,7 +26,7 @@ VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
 sys.path.insert(0, str(VENDOR_DIR / "GroundingDINO"))
 sys.path.insert(0, str(VENDOR_DIR / "Depth-Anything-V2"))
 
-from engine import wall_prior, mask_refine, foreground, depth, compositor
+from engine import wall_prior, mask_refine, foreground, depth, compositor, scale_calibrate
 
 logging.basicConfig(
     level=logging.INFO,
@@ -344,6 +344,22 @@ async def wall_mask_endpoint(req: WallMaskRequest):
     logger.info("Wall mask complete: total=%.2fs, mask pixels=%d (%.1f%% of box)",
                 timings["total"], clean_mask.sum() // 255,
                 (clean_mask.sum() / 255) / max(box_pixels, 1) * 100)
+    # ── Stage 5: Scale calibration ──────────────────────────────────────────
+    t5 = time.time()
+    calibration = scale_calibrate.calibrate_scale(
+        image,
+        segmentation_argmax=seg_result["argmax"],
+        wall_mask=clean_mask,
+        box=(x1, y1, x2, y2),
+    )
+    timings["scale_calibrate"] = round(time.time() - t5, 2)
+    timings["total"] = round(time.time() - t0, 2)
+
+    logger.info(
+        "Scale calibration: px/cm=%.3f, wall=%.0fcm, confidence=%s, method=%s",
+        calibration["px_per_cm"], calibration["wall_height_cm"],
+        calibration["confidence"], calibration["method"],
+    )
 
     # ── Build overlay visualization ───────────────────────────────────────
     overlay = render_mask_overlay(image, clean_mask)
@@ -354,6 +370,7 @@ async def wall_mask_endpoint(req: WallMaskRequest):
         "foreground_mask": mask_to_b64(fg_mask),
         "exclude_mask": mask_to_b64(exclude_mask),
         "overlay": image_to_b64(overlay),
+        "calibration": calibration,
         "timings": timings,
         "stats": {
             "wall_pixels": int(clean_mask.sum() // 255),

@@ -293,10 +293,8 @@ def compute_texture_scale(
 ) -> float:
     """Map product mm + albedo height to on-screen tile scale (realistic brick size).
 
-    Uses the FULL IMAGE dimensions for context, not just the polygon. The AI
-    scene analysis (when available) provides calibrated wall dimensions from
-    reference objects visible anywhere in the whole photograph (doors, windows,
-    switches, etc.), giving accurate real-world measurements.
+    When CV-calibrated px_per_cm is available, it is used directly for maximum
+    accuracy. Otherwise falls back to AI wall height or heuristic estimation.
     """
     module_h = float(meta.get("moduleHeightMm", 65))
     joint = float(meta.get("jointMm", 10))
@@ -305,14 +303,46 @@ def compute_texture_scale(
     courses = int(meta.get("albedoBrickCourses", meta.get("albedoCourses", 8)))
     courses = max(1, min(courses, 32))
 
-    if layout in ("running-bond", "stretcher-bond"):
+    if layout in ("running-bond", "stretcher-bond", "random-stone"):
         albedo_h_mm = module_h * courses + joint * max(courses - 1, 0)
     else:
         planks = int(meta.get("albedoStackPlanks", meta.get("albedoPlankCount", 2)))
         planks = max(1, min(planks, 12))
         albedo_h_mm = module_h * planks + joint * max(planks - 1, 0)
 
-    # Always prefer AI-measured wall height when available (any confidence)
+    # ── Method 1: Direct px_per_cm from CV calibration (highest accuracy) ──
+    if analysis and analysis.get("px_per_cm"):
+        px_per_cm = float(analysis["px_per_cm"])
+        px_per_mm = px_per_cm / 10.0
+
+        target_h_px = max(albedo_h_mm * px_per_mm, 1.0)
+        scale = target_h_px / float(texture_height_px)
+
+        # Log the verification: what will one brick look like
+        brick_px = module_h * px_per_mm
+        joint_px = joint * px_per_mm
+        confidence = analysis.get("confidence", "unknown")
+        method = analysis.get("calibration_method", "unknown")
+        logger.info(
+            "CV-calibrated scale: %.4f — px/cm=%.3f (%s/%s), "
+            "1 brick=%.1fmm→%.1fpx, 1 joint=%.1fmm→%.1fpx, "
+            "albedo tile=%.0fmm→%.0fpx",
+            scale, px_per_cm, confidence, method,
+            module_h, brick_px, joint, joint_px,
+            albedo_h_mm, target_h_px,
+        )
+
+        mult = float(meta.get("textureScaleMultiplier", 1.0))
+        env_m = os.environ.get("STEGU_TEXTURE_SCALE_MULTIPLIER")
+        if env_m:
+            try:
+                mult *= float(env_m)
+            except ValueError:
+                pass
+        mult = max(0.35, min(mult, 2.5))
+        return scale * mult
+
+    # ── Method 2: AI-measured wall height (legacy) ─────────────────────────
     if analysis and analysis.get("wallHeightCm"):
         wall_mm = float(analysis["wallHeightCm"]) * 10.0
         wall_mm = max(500.0, min(wall_mm, 12000.0))
@@ -330,6 +360,7 @@ def compute_texture_scale(
         wall_mm = estimate_wall_span_mm(polygon_height_px, image_height_px, image_width_px)
         logger.info("Using heuristic wall height: %.0f mm (no AI analysis)", wall_mm)
 
+    # ── Method 3: Heuristic (fallback) ─────────────────────────────────────
     px_per_mm = polygon_height_px / wall_mm
 
     target_h_px = max(albedo_h_mm * px_per_mm, 1.0)
