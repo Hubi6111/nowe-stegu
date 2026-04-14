@@ -293,18 +293,24 @@ def compute_texture_scale(
 ) -> float:
     """Compute how much to scale the albedo texture for realistic tiling.
 
-    The key insight: each albedo texture's metadata now contains
-    `tileRealHeightMm` — the exact real-world height (in mm) that the
-    albedo image represents. This eliminates all course/plank counting.
+    RESOLUTION-INDEPENDENT approach:
 
-    Scale formula:
-      target_px = tileRealHeightMm × px_per_mm
-      scale     = target_px / texture_height_px
+    The fundamental equation is:
+      scale = (tile_real_cm / selection_real_cm) × (polygon_height_px / texture_height_px)
 
-    Where px_per_mm comes from CV calibration (ceiling/door detection)
-    or falls back to assuming the visible wall ≈ 270cm.
+    Where:
+      - tile_real_cm: real-world height the texture tile represents (from metadata)
+      - selection_real_cm: real-world height of the user's selection (from calibration)
+      - polygon_height_px: pixel height of the selection in the scene image
+      - texture_height_px: pixel height of the raw albedo texture
+
+    The ratio (tile_real_cm / selection_real_cm) is RESOLUTION-INDEPENDENT.
+    The ratio (polygon_height_px / texture_height_px) normalizes texture to selection pixels.
+
+    This means the SAME physical scene will produce the SAME texture scale
+    whether the input image is 500px or 5000px tall.
     """
-    # ── 1. Get the real-world height this albedo tile covers (mm) ──────
+    # ── 1. Get the real-world height this albedo tile covers (mm → cm) ──
     tile_real_h_mm = float(meta.get("tileRealHeightMm", 0))
 
     if tile_real_h_mm <= 0:
@@ -325,24 +331,34 @@ def compute_texture_scale(
 
         logger.info("Legacy tile height calc: %.0fmm (no tileRealHeightMm in metadata)", tile_real_h_mm)
 
-    # ── 2. Determine px_per_mm ────────────────────────────────────────
-    if analysis and analysis.get("px_per_cm"):
-        # Best: CV-calibrated from ceiling/floor/door detection
-        px_per_cm = float(analysis["px_per_cm"])
-        px_per_mm = px_per_cm / 10.0
-        source = f"cv-calibration (px/cm={px_per_cm:.3f})"
-    else:
-        # Fallback: assume visible wall selection ≈ 270cm
-        wall_mm = 2700.0  # 270cm standard ceiling
-        if analysis and analysis.get("wallHeightCm"):
-            wall_mm = float(analysis["wallHeightCm"]) * 10.0
-            wall_mm = max(1500.0, min(wall_mm, 5000.0))
-        px_per_mm = polygon_height_px / wall_mm
-        source = f"heuristic (wall={wall_mm:.0f}mm)"
+    tile_real_cm = tile_real_h_mm / 10.0  # Convert mm to cm
 
-    # ── 3. Compute scale ──────────────────────────────────────────────
-    target_h_px = max(tile_real_h_mm * px_per_mm, 1.0)
-    scale = target_h_px / float(texture_height_px)
+    # ── 2. Determine the REAL-WORLD height of the selection (cm) ────────
+    # This is the critical value — must be scene-aware, NOT resolution-dependent
+    if analysis and analysis.get("wallHeightCm"):
+        selection_real_cm = float(analysis["wallHeightCm"])
+        source = f"cv-calibrated ({selection_real_cm:.0f}cm)"
+    elif analysis and analysis.get("px_per_cm"):
+        # Derive from px_per_cm and polygon height
+        px_per_cm = float(analysis["px_per_cm"])
+        selection_real_cm = polygon_height_px / px_per_cm
+        source = f"px_per_cm-derived ({selection_real_cm:.0f}cm)"
+    else:
+        # Fallback: assume selection = typical wall section
+        # Use 270cm as standard interior wall height
+        selection_real_cm = 270.0
+        source = f"default ({selection_real_cm:.0f}cm)"
+
+    # Sanity clamp: a selection should represent 50cm to 1000cm
+    selection_real_cm = max(50.0, min(selection_real_cm, 1000.0))
+
+    # ── 3. Compute scale (RESOLUTION-INDEPENDENT) ─────────────────────
+    # How many texture tiles fit vertically in the selection?
+    # tile_ratio = tile_real_cm / selection_real_cm (e.g., 60cm tile / 270cm wall = 0.222)
+    # pixel_ratio = polygon_height_px / texture_height_px (normalize to scene pixels)
+    tile_ratio = tile_real_cm / selection_real_cm
+    pixel_ratio = polygon_height_px / float(texture_height_px)
+    scale = tile_ratio * pixel_ratio
 
     # ── 4. Apply per-product multiplier if set ────────────────────────
     mult = float(meta.get("textureScaleMultiplier", 1.0))
@@ -356,13 +372,13 @@ def compute_texture_scale(
     final_scale = scale * mult
 
     # ── 5. Log for debugging ──────────────────────────────────────────
-    module_h = float(meta.get("moduleHeightMm", 80))
-    brick_px = module_h * px_per_mm
+    module_h_cm = float(meta.get("moduleHeightMm", 80)) / 10.0
+    module_px = module_h_cm / selection_real_cm * polygon_height_px
     logger.info(
-        "TEXTURE SCALE: %.4f (×%.2f mult) — tile=%.0fmm→%.0fpx, "
-        "1 module=%dmm→%.0fpx, source=%s, product=%s",
-        final_scale, mult, tile_real_h_mm, target_h_px,
-        int(module_h), brick_px, source, meta.get("name", "?"),
+        "TEXTURE SCALE: %.4f (×%.2f mult) — tile=%.1fcm, selection=%.0fcm, "
+        "1 module=%.1fcm→%.0fpx, source=%s, product=%s",
+        final_scale, mult, tile_real_cm, selection_real_cm,
+        module_h_cm, module_px, source, meta.get("name", "?"),
     )
 
     return final_scale

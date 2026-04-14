@@ -1,5 +1,89 @@
 [
   {
+    "id": "20260414-054353-3d33a0",
+    "timestamp": "2026-04-14 05:43:53",
+    "client_ip": "127.0.0.1",
+    "product_id": "country-610",
+    "product_name": "Country 610",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.16,
+      "total": 0.17
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-054218-edee62",
+    "timestamp": "2026-04-14 05:42:18",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.27,
+      "total": 0.28
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-054151-c09aa9",
+    "timestamp": "2026-04-14 05:41:51",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-1",
+    "product_name": "Cambridge 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.37,
+      "total": 0.39
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-054135-441ea1",
+    "timestamp": "2026-04-14 05:41:35",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.16,
+      "total": 0.17
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-054119-aa839e",
+    "timestamp": "2026-04-14 05:41:19",
+    "client_ip": "127.0.0.1",
+    "product_id": "monsanto-1",
+    "product_name": "Monsanto 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.16,
+      "total": 0.17
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-054100-c11fab",
+    "timestamp": "2026-04-14 05:41:00",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.16,
+      "total": 0.18
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-053605-39a30b",
     "timestamp": "2026-04-14 05:36:05",
     "client_ip": "127.0.0.1",
