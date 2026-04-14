@@ -169,42 +169,72 @@ async def refine_render(req: RefineRequest, request: Request):
         logger.error("Image preparation failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=400, detail=f"Błąd przygotowania obrazów: {exc}")
 
-    # ── Build Gemini request ─────────────────────────────────────────
-    payload = {
-        "contents": [{
-            "parts": [
-                {"text": "COMPOSITE (computer-generated visualization):"},
-                composite_part,
-                {"text": "ORIGINAL photograph:"},
-                original_part,
-                {"text": "TEXTURE sample:"},
-                texture_part,
-                {"text": prompt},
-            ]
-        }],
-        "generationConfig": {
-            "responseModalities": ["TEXT", "IMAGE"],
-            "temperature": 0.2,
-        },
-    }
+    # ── FALLBACK CHAIN: try multiple models + configs until one works ──
+    # Each attempt: (model_idx, max_dim, include_texture, delay_before)
+    MODELS = [
+        "gemini-3.1-flash-image-preview",  # Nano Banana 2 (newest)
+        "gemini-2.5-flash-image",           # Nano Banana 1 (stable)
+    ]
+    ATTEMPTS = [
+        # (model_idx, max_dim, include_texture, delay_s)
+        (0, 768, True,  0),    # NB2, 768px, 3 images
+        (0, 768, True,  3),    # NB2, 768px, 3 images (retry with delay)
+        (0, 640, False, 3),    # NB2, 640px, 2 images (no texture)
+        (1, 768, True,  2),    # NB1, 768px, 3 images
+        (1, 768, True,  3),    # NB1, 768px, 3 images (retry)
+        (1, 640, False, 3),    # NB1, 640px, 2 images
+        (0, 512, False, 5),    # NB2, 512px, 2 images (last resort)
+    ]
 
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{MODEL_ID}:generateContent?key={GEMINI_API_KEY}"
-    )
-
-    # ── Retry up to 3 times ──────────────────────────────────────────
     last_error = None
-    for attempt in range(3):
+    total_attempts = len(ATTEMPTS)
+
+    for attempt_idx, (model_idx, max_dim, use_texture, delay) in enumerate(ATTEMPTS):
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        model = MODELS[model_idx]
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{model}:generateContent?key={GEMINI_API_KEY}"
+        )
+
+        # Build parts for this attempt
+        c_part = _img_to_gemini_part(composite_img, max_dim=max_dim)
+        o_part = _img_to_gemini_part(original_img, max_dim=max_dim)
+
+        parts = [
+            {"text": "COMPOSITE (computer-generated visualization):"},
+            c_part,
+            {"text": "ORIGINAL photograph:"},
+            o_part,
+        ]
+        if use_texture:
+            parts.append({"text": "TEXTURE sample:"})
+            parts.append(_img_to_gemini_part(texture_img, max_dim=min(384, max_dim)))
+
+        parts.append({"text": prompt})
+
+        attempt_payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {
+                "responseModalities": ["TEXT", "IMAGE"],
+                "temperature": 0.2,
+            },
+        }
+
         t0 = time.time()
-        logger.info("Gemini refine attempt %d/3 (product=%s)", attempt + 1, req.product_name)
+        logger.info(
+            "Refine attempt %d/%d: model=%s, dim=%d, texture=%s",
+            attempt_idx + 1, total_attempts, model, max_dim, use_texture,
+        )
 
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(url, json=payload)
+                resp = await client.post(url, json=attempt_payload)
 
             elapsed = round(time.time() - t0, 1)
-            logger.info("Gemini response: HTTP %d in %.1fs", resp.status_code, elapsed)
+            logger.info("Response: HTTP %d in %.1fs (model=%s)", resp.status_code, elapsed, model)
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -213,8 +243,8 @@ async def refine_render(req: RefineRequest, request: Request):
                     last_error = "Brak wyników od modelu"
                     continue
 
-                parts = candidates[0].get("content", {}).get("parts", [])
-                for part in parts:
+                parts_resp = candidates[0].get("content", {}).get("parts", [])
+                for part in parts_resp:
                     if "inlineData" in part:
                         mime = part["inlineData"]["mimeType"]
                         img_b64 = part["inlineData"]["data"]
@@ -235,61 +265,43 @@ async def refine_render(req: RefineRequest, request: Request):
                         client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
                         increment_usage(client_ip)
 
+                        logger.info("SUCCESS on attempt %d/%d (model=%s, dim=%d)", attempt_idx + 1, total_attempts, model, max_dim)
                         return {"image": f"data:{mime};base64,{img_b64}", "elapsed": elapsed}
 
                 finish_reason = candidates[0].get("finishReason", "unknown")
                 last_error = f"Model nie wygenerował obrazu ({finish_reason})"
                 continue
 
+            elif resp.status_code == 403:
+                try:
+                    msg = resp.json().get("error", {}).get("message", "")
+                except Exception:
+                    msg = resp.text[:200]
+                logger.error("403 PERMANENT: %s", msg)
+                if "leaked" in msg.lower():
+                    raise HTTPException(502, detail="Klucz API zablokowany — wygeneruj nowy w Google AI Studio")
+                last_error = f"Brak dostępu: {msg}"
+                break
+
             elif resp.status_code == 429:
-                last_error = "Zbyt wiele żądań — spróbuj za chwilę"
-                await asyncio.sleep(5 * (attempt + 1))
+                last_error = "Rate limit"
+                await asyncio.sleep(5)
                 continue
 
-            elif resp.status_code == 400:
-                logger.error("Gemini 400: %s", resp.text[:300])
-                if attempt < 2:
-                    composite_part = _img_to_gemini_part(composite_img, max_dim=768)
-                    original_part = _img_to_gemini_part(original_img, max_dim=768)
-                    payload["contents"][0]["parts"][1] = composite_part
-                    payload["contents"][0]["parts"][3] = original_part
-                    last_error = "Ponawiam z mniejszymi obrazami…"
-                    continue
-                last_error = "Nie udało się przetworzyć obrazów"
-                break
-
-            elif resp.status_code == 500:
-                # Google server error — log body, backoff, downscale
-                err_body = resp.text[:300] if resp.text else "no body"
-                logger.warning("Gemini 500 (attempt %d): %s", attempt + 1, err_body)
-                if attempt < 2:
-                    # Downscale for next attempt
-                    new_dim = 768 if attempt == 0 else 640
-                    composite_part = _img_to_gemini_part(composite_img, max_dim=new_dim)
-                    original_part = _img_to_gemini_part(original_img, max_dim=new_dim)
-                    payload["contents"][0]["parts"][1] = composite_part
-                    payload["contents"][0]["parts"][3] = original_part
-                    # On last retry, drop texture image (send only 2 images)
-                    if attempt == 1:
-                        # Remove texture part (index 5) and its label (index 4)
-                        payload["contents"][0]["parts"] = payload["contents"][0]["parts"][:4]
-                    last_error = f"Serwer Google — ponawiam z mniejszymi obrazami ({new_dim}px)…"
-                    await asyncio.sleep(2 * (attempt + 1))
-                    continue
-                last_error = "Serwer Google tymczasowo niedostępny — spróbuj za chwilę"
-                break
-
             else:
-                last_error = f"Błąd API (HTTP {resp.status_code})"
-                if attempt < 2:
-                    await asyncio.sleep(2)
+                # 400, 500, etc — just try next attempt
+                err_body = resp.text[:200] if resp.text else ""
+                logger.warning("HTTP %d from %s: %s", resp.status_code, model, err_body)
+                last_error = f"HTTP {resp.status_code}"
                 continue
 
         except httpx.TimeoutException:
-            last_error = "Przekroczono czas oczekiwania — spróbuj ponownie"
+            last_error = "Timeout"
             continue
+        except HTTPException:
+            raise
         except Exception as exc:
-            last_error = f"Błąd połączenia: {exc}"
+            last_error = f"Connection error: {exc}"
             continue
 
-    raise HTTPException(status_code=502, detail=last_error or "Nie udało się wygenerować renderingu")
+    raise HTTPException(status_code=502, detail="Nie udało się wygenerować — spróbuj ponownie za chwilę")
