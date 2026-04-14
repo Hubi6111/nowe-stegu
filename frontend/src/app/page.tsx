@@ -715,7 +715,7 @@ export default function Home() {
   useEffect(() => {
     if (products.length > 0 && Object.keys(openCategories).length === 0) {
       const initial: Record<string, boolean> = {};
-      Object.keys(grouped).forEach(cat => { initial[cat] = true; });
+      Object.keys(grouped).forEach(cat => { initial[cat] = false; });
       setOpenCategories(initial);
     }
   }, [products.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -980,7 +980,7 @@ export default function Home() {
 
                       {/* Result content */}
                       {resultTab === "compare" && (originalImageSrc || imageSrc) && renderData.refined ? (
-                        <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} initialPosition={5} />
+                        <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} initialPosition={50} />
                       ) : resultTab === "after" && renderData.refined ? (
                         <img src={renderData.refined} alt="Po wizualizacji" className="rounded-xl w-full" />
                       ) : resultTab === "before" && (originalImageSrc || imageSrc) ? (
