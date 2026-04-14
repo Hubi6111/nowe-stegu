@@ -64,27 +64,31 @@ def _img_to_gemini_part(img: Image.Image, max_dim: int = MAX_DIM) -> dict:
     }
 
 
-REFINE_PROMPT = """You are a professional architectural visualization artist. You have been given three images:
+REFINE_PROMPT = """You are a professional architectural visualization artist performing a MINIMAL refinement pass.
 
-1. **COMPOSITE** — A computer-generated visualization where a decorative wall texture ({product_name} — {material_type}) has been digitally projected onto a wall in an interior photo. This is a rough composite that needs refinement.
+You have been given three images:
+1. **COMPOSITE** — A visualization where the texture "{product_name}" ({material_type}) was digitally applied to a specific wall area.
+2. **ORIGINAL** — The original unmodified interior photograph.
+3. **TEXTURE** — The raw texture sample used.
 
-2. **ORIGINAL** — The original, unmodified interior photograph showing the room as it actually looks.
+**YOUR ONLY JOB: Make the COMPOSITE look photorealistic WITHOUT changing what is textured.**
 
-3. **TEXTURE** — The raw texture/material sample ({product_name}) that was applied to the wall.
+**ABSOLUTE RULES — NEVER BREAK THESE:**
+- DO NOT expand the textured area. The texture must cover EXACTLY the same pixels as in the COMPOSITE — not one pixel more.
+- DO NOT add texture to walls, surfaces, or areas that are NOT already textured in the COMPOSITE.
+- DO NOT change the scale, orientation, or tiling pattern of the texture.
+- DO NOT alter, move, remove, or modify ANY non-wall element (furniture, doors, windows, floor, ceiling, decorations, people, plants).
 
-Your task is to produce a SINGLE photorealistic result image that:
+**WHAT YOU SHOULD DO (subtle corrections only):**
+- Fix small seams or visible tiling joints within the ALREADY textured area
+- Add subtle shadows where the textured wall meets furniture, door frames, and the floor/ceiling
+- Match the wall lighting to the room's ambient light (warm/cool tone, direction)
+- Smooth the boundary edges where the texture meets non-textured surfaces — make them look natural
+- Add appropriate material reflections (matte for brick, slight sheen for polished stone)
 
-**CRITICAL REQUIREMENTS:**
-- The wall area that was textured in the COMPOSITE must remain covered with the SAME texture pattern ({product_name}), maintaining the exact same scale, placement, and tiling pattern
-- Fix any visible seams, gaps, or imperfections in the texture coverage — the wall should look like it was genuinely clad with this material
-- Add realistic shadows and ambient occlusion where the textured wall meets furniture, floor, ceiling, door frames, and other objects
-- Match the lighting conditions from the ORIGINAL photo — if there's warm light from a window, the textured wall should reflect that same warmth and direction
-- Preserve ALL non-wall elements exactly as they appear in the ORIGINAL: furniture, doors, windows, floor, ceiling, decorations, plants — do not alter anything except the wall surface
-- The edges where texture meets objects (furniture, frames, outlets) should be clean and natural with proper shadow transitions
-- Add subtle light reflections on the texture surface consistent with the material properties (matte for brick, slight sheen for stone)
-- The final result should be completely indistinguishable from a real photograph of a room with this wall cladding installed
+**IMPORTANT:** If in doubt, change LESS. The goal is a subtle polish, not a redesign. The textured area boundary must remain IDENTICAL to the COMPOSITE.
 
-**OUTPUT:** Generate exactly one refined, photorealistic image. Do NOT include any text, labels, or watermarks."""
+**OUTPUT:** Generate exactly one refined image. No text, no labels, no watermarks."""
 
 
 @router.get("/refine-status")
