@@ -87,6 +87,31 @@ Your task is to produce a SINGLE photorealistic result image that:
 **OUTPUT:** Generate exactly one refined, photorealistic image. Do NOT include any text, labels, or watermarks."""
 
 
+@router.get("/refine-status")
+async def refine_status():
+    """Check if refine images are saved and ready."""
+    data_dir = Path(os.environ.get("DATA_DIR", "./data"))
+    refine_dir = data_dir / "refine-temp"
+    textures_dir = Path(os.environ.get("TEXTURES_DIR", ""))
+
+    composite_path = refine_dir / "composite.jpg"
+    original_path = refine_dir / "original.jpg"
+
+    result = {
+        "data_dir": str(data_dir),
+        "refine_dir": str(refine_dir),
+        "textures_dir": str(textures_dir),
+        "composite_exists": composite_path.exists(),
+        "original_exists": original_path.exists(),
+        "composite_size": composite_path.stat().st_size if composite_path.exists() else 0,
+        "original_size": original_path.stat().st_size if original_path.exists() else 0,
+        "gemini_key_set": bool(GEMINI_API_KEY),
+        "model": MODEL_ID,
+    }
+    logger.info("Refine status: %s", result)
+    return result
+
+
 @router.post("/refine")
 async def refine_render(req: RefineRequest):
     """Refine a composite render using Gemini image editing.

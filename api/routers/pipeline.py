@@ -495,6 +495,16 @@ async def render_stream(req: RenderFinalRequest, request: Request):
         final_output = composite
         refined_b64 = image_to_b64(final_output)
 
+        # ── Save images to disk for refine endpoint ────────────────────
+        try:
+            refine_dir = Path(os.environ.get("DATA_DIR", "./data")) / "refine-temp"
+            refine_dir.mkdir(parents=True, exist_ok=True)
+            image.save(refine_dir / "original.jpg", "JPEG", quality=92)
+            composite.save(refine_dir / "composite.jpg", "JPEG", quality=92)
+            logger.info("Saved refine images to %s", refine_dir)
+        except Exception as save_exc:
+            logger.warning("Failed to save refine images: %s", save_exc)
+
         # ── Watermark ─────────────────────────────────────────────────────
         try:
             watermarked = _apply_watermark(final_output)
