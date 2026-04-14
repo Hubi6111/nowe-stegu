@@ -80,3 +80,34 @@ html {
 .scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
 .scrollbar-thin::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 99px; }
 .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+
+/* ── Grid loading cells ── */
+@keyframes grid-cell-pulse {
+  0%, 100% { 
+    background-color: #e7e0da; 
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% { 
+    background-color: #A01B1B; 
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.grid-loading-cell {
+  animation: grid-cell-pulse 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ── Animated status text ── */
+@keyframes status-text-cycle {
+  0%   { opacity: 0; transform: translateY(6px); }
+  12%  { opacity: 1; transform: translateY(0); }
+  88%  { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-6px); }
+}
+
+.animate-status-text {
+  animation: status-text-cycle 2.5s ease-in-out infinite;
+}
+

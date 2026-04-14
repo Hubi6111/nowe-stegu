@@ -1,5 +1,19 @@
 [
   {
+    "id": "20260414-030041-772e40",
+    "timestamp": "2026-04-14 03:00:41",
+    "client_ip": "127.0.0.1",
+    "product_id": "country-610",
+    "product_name": "Country 610",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.33,
+      "total": 0.34
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-025012-32e346",
     "timestamp": "2026-04-14 02:50:12",
     "client_ip": "127.0.0.1",

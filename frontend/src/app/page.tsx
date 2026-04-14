@@ -29,14 +29,14 @@ interface ScaleInfo {
   wallWidthCm: number;
   courses: number;
   unitsPerRow: number;
-  dimensionSource: "ai" | "heuristic";
+  dimensionSource: "calibrated" | "heuristic";
   sceneType: "interior" | "exterior";
   referenceObjects: string[];
 }
 interface RenderData {
   composite: string | null;
   refined: string | null;
-  geminiModel: string;
+  renderEngine: string;
   timings: Record<string, number>;
   scale?: ScaleInfo;
   analysis?: Record<string, unknown>;
@@ -57,9 +57,9 @@ interface PipelineStage {
 }
 
 const INITIAL_STAGES: PipelineStage[] = [
-  { id: "mask", label: "Inteligentna maska ściany", status: "pending" },
-  { id: "decode", label: "Dekodowanie obrazu", status: "pending" },
-  { id: "texture", label: "Projekcja tekstury", status: "pending" },
+  { id: "mask", label: "Analiza ściany", status: "pending" },
+  { id: "decode", label: "Przetwarzanie obrazu", status: "pending" },
+  { id: "texture", label: "Nakładanie tekstury", status: "pending" },
 ];
 
 function StageIcon({ status }: { status: PipelineStage["status"] }) {
@@ -193,6 +193,46 @@ function IconCart() { return <svg width="16" height="16" viewBox="0 0 24 24" fil
 
 /* ── Loading overlay ── */
 
+const LOADING_MESSAGES = [
+  "Badanie sceny…",
+  "Wykrywanie ściany…",
+  "Analiza geometrii…",
+  "Kalibracja wymiarów…",
+  "Ładowanie tekstur…",
+  "Dopasowywanie perspektywy…",
+  "Nakładanie materiału…",
+  "Renderowanie…",
+];
+
+function AnimatedStatusText({ currentMessage }: { currentMessage?: string }) {
+  const [msgIndex, setMsgIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    if (currentMessage) return;
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setMsgIndex(prev => (prev + 1) % LOADING_MESSAGES.length);
+        setVisible(true);
+      }, 300);
+    }, 2200);
+    return () => clearInterval(interval);
+  }, [currentMessage]);
+
+  const text = currentMessage || LOADING_MESSAGES[msgIndex];
+
+  return (
+    <p
+      className={`text-xs text-stone-500 font-medium tracking-wide transition-all duration-300 ${
+        visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
+      }`}
+    >
+      {text}
+    </p>
+  );
+}
+
 function PipelineStatusPanel({ stages, isOverlay }: { stages: PipelineStage[]; isOverlay?: boolean }) {
   const [expandedAnalysis, setExpandedAnalysis] = useState(false);
   const currentRunning = stages.find(s => s.status === "running");
@@ -205,32 +245,43 @@ function PipelineStatusPanel({ stages, isOverlay }: { stages: PipelineStage[]; i
   const analysisData = analysisStage?.analysis as Record<string, unknown> | undefined;
 
   const wrapperClass = isOverlay
-    ? "absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/90 backdrop-blur-md rounded-2xl animate-fade-in p-4"
+    ? "absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/92 backdrop-blur-xl rounded-2xl animate-fade-in p-6"
     : "w-full";
 
   return (
     <div className={wrapperClass}>
       {isOverlay && (
         <>
-          <div className="relative w-14 h-14 mb-4">
-            <svg className="absolute inset-0 w-full h-full" viewBox="0 0 56 56" fill="none">
-              <circle cx="28" cy="28" r="24" stroke="#f5f0ed" strokeWidth="3" />
-            </svg>
-            <svg className="absolute inset-0 w-full h-full animate-loader-spin" viewBox="0 0 56 56" fill="none">
-              <circle cx="28" cy="28" r="24" stroke="#A01B1B" strokeWidth="3" strokeLinecap="round"
-                strokeDasharray={`${(completedCount / totalStages) * 151} ${151 - (completedCount / totalStages) * 151}`}
-                transform="rotate(-90 28 28)" />
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-xs font-bold text-[#A01B1B]">{completedCount}/{totalStages}</span>
+          {/* Grid loading animation */}
+          <div className="mb-5">
+            <div className="relative">
+              <div className="grid grid-cols-3 gap-[3px] w-14 h-14">
+                {Array.from({ length: 9 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="rounded-[2px] grid-loading-cell"
+                    style={{ animationDelay: `${i * 0.1}s` }}
+                  />
+                ))}
+              </div>
             </div>
           </div>
-          <p className="text-sm font-semibold text-stone-700 mb-1">Generowanie wizualizacji</p>
-          {currentRunning && (
-            <p className="text-[11px] text-stone-500 mb-3 bg-stone-100 px-3 py-1 rounded-full">
-              {currentRunning.message || currentRunning.label}
-            </p>
-          )}
+
+          {/* Stage counter */}
+          <div className="flex items-center gap-2 mb-2">
+            <span className="text-sm font-bold text-[#A01B1B] tabular-nums">{completedCount}/{totalStages}</span>
+            <div className="w-24 h-1 bg-stone-200 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-[#A01B1B] rounded-full transition-all duration-500 ease-out"
+                style={{ width: `${(completedCount / totalStages) * 100}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Animated cycling status text */}
+          <div className="h-5 flex items-center mb-4">
+            <AnimatedStatusText currentMessage={currentRunning?.message || currentRunning?.label} />
+          </div>
         </>
       )}
 
@@ -271,70 +322,6 @@ function PipelineStatusPanel({ stages, isOverlay }: { stages: PipelineStage[]; i
             </div>
           ))}
         </div>
-
-        {/* Expandable analysis details */}
-        {analysisData && (analysisStage?.status === "done") && (
-          <div className="mt-2 border-t border-stone-100 pt-2">
-            <button
-              type="button"
-              onClick={() => setExpandedAnalysis(!expandedAnalysis)}
-              className="flex items-center gap-1.5 text-[10px] font-semibold text-stone-500 hover:text-stone-700 transition-colors cursor-pointer"
-            >
-              <span className="transform transition-transform" style={{ transform: expandedAnalysis ? 'rotate(90deg)' : '' }}>▶</span>
-              Szczegóły analizy sceny
-            </button>
-            {expandedAnalysis && (
-              <div className="mt-1.5 pl-4 space-y-1 text-[10px] text-stone-500">
-                {analysisData.wallHeightCm && (
-                  <p>📐 Ściana: <b>{String(analysisData.wallHeightCm)} × {String(analysisData.wallWidthCm)} cm</b></p>
-                )}
-                {analysisData.ceilingHeightCm && (
-                  <p>🏠 Sufit: <b>{String(analysisData.ceilingHeightCm)} cm</b></p>
-                )}
-                {analysisData.confidence && (
-                  <p>🎯 Pewność: <b className={String(analysisData.confidence) === 'high' ? 'text-emerald-600' : String(analysisData.confidence) === 'medium' ? 'text-amber-600' : 'text-red-500'}>{String(analysisData.confidence)}</b></p>
-                )}
-                {analysisData.measurementMethod && (
-                  <p>📏 Metoda: <span className="text-stone-400">{String(analysisData.measurementMethod)}</span></p>
-                )}
-                {Array.isArray(analysisData.referenceObjects) && (analysisData.referenceObjects as Array<Record<string, unknown>>).length > 0 && (
-                  <div>
-                    <p>📌 Referencje:</p>
-                    <ul className="ml-3">
-                      {(analysisData.referenceObjects as Array<Record<string, unknown>>).map((r, i) => (
-                        <li key={i}>• {String(r.name)} ({String(r.realHeightCm)}cm, px/cm: {String(r.pxPerCm)}, {String(r.confidence)})</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {Array.isArray(analysisData.occluders) && (analysisData.occluders as string[]).length > 0 && (
-                  <p>🚧 Przeszkody: {(analysisData.occluders as string[]).join(", ")}</p>
-                )}
-                {analysisData.textureScaleCorrect !== undefined && (
-                  <p>📊 Skala tekstury: <b className={analysisData.textureScaleCorrect ? 'text-emerald-600' : 'text-red-500'}>
-                    {analysisData.textureScaleCorrect ? "prawidłowa" : "nieprawidłowa"}
-                  </b>
-                  {analysisData.scaleNote && <span className="text-stone-400"> — {String(analysisData.scaleNote)}</span>}
-                  </p>
-                )}
-                {analysisData.lighting && typeof analysisData.lighting === 'object' && (
-                  <div>
-                    <p>💡 Oświetlenie:</p>
-                    <ul className="ml-3">
-                      {(analysisData.lighting as Record<string,unknown>).primarySource && <li>• Źródło: {String((analysisData.lighting as Record<string,unknown>).primarySource)}</li>}
-                      {(analysisData.lighting as Record<string,unknown>).temperature && <li>• Temperatura: {String((analysisData.lighting as Record<string,unknown>).temperature)} ({String((analysisData.lighting as Record<string,unknown>).temperatureKelvin || "?")}K)</li>}
-                      {(analysisData.lighting as Record<string,unknown>).gradient && <li>• Gradient: {String((analysisData.lighting as Record<string,unknown>).gradient)}</li>}
-                      {(analysisData.lighting as Record<string,unknown>).shadowType && <li>• Cienie: {String((analysisData.lighting as Record<string,unknown>).shadowType)}</li>}
-                    </ul>
-                  </div>
-                )}
-                {analysisData.perspective && typeof analysisData.perspective === 'object' && (analysisData.perspective as Record<string,unknown>).type && (
-                  <p>📷 Perspektywa: {String((analysisData.perspective as Record<string,unknown>).type)} (~{String((analysisData.perspective as Record<string,unknown>).angleDeg || 0)}°)</p>
-                )}
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -345,7 +332,7 @@ function PipelineStatusPanel({ stages, isOverlay }: { stages: PipelineStage[]; i
 const STEPS = [
   { n: 1, label: "Zdjęcie" },
   { n: 2, label: "Ściana i materiał" },
-  { n: 3, label: "AI wizualizacja" },
+  { n: 3, label: "Wizualizacja" },
   { n: 4, label: "Gotowe" },
 ];
 
@@ -645,7 +632,7 @@ export default function Home() {
               setRenderData({
                 composite: (result.composite as string) || null,
                 refined: (result.refined as string) || (result.composite as string) || null,
-                geminiModel: (result.gemini_model as string) || "unknown",
+                renderEngine: (result.gemini_model as string) || "deterministic",
                 timings: (result.timings as Record<string, number>) || {},
                 analysis: (result.analysis as Record<string, unknown>) || finalAnalysis,
               });
@@ -794,7 +781,7 @@ export default function Home() {
                 Zobacz produkt na swojej ścianie
               </h1>
               <p className="text-stone-500 mt-1.5 text-xs sm:text-sm max-w-lg mx-auto leading-relaxed hidden sm:block">
-                Wgraj swoje zdjęcie, zaznacz ścianę i sprawdź jak będzie wyglądał wybrany produkt Stegu — w realistycznej wizualizacji AI.
+                Wgraj swoje zdjęcie, zaznacz ścianę i sprawdź jak będzie wyglądał wybrany produkt Stegu — w realistycznej wizualizacji.
               </p>
               <div className="flex items-center justify-center gap-4 mt-2 text-[10px] text-stone-400">
                 <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#A01B1B]/40" /> Bezpłatne</span>
@@ -837,7 +824,7 @@ export default function Home() {
               {[
                 { title: "Wgraj zdjęcie", desc: "Własne lub z przykładów", num: "1" },
                 { title: "Zaznacz ścianę", desc: "Wybierz produkt Stegu", num: "2" },
-                { title: "Zamów", desc: "Wizualizacja AI + link do sklepu", num: "3" },
+                { title: "Zamów", desc: "Wizualizacja + link do sklepu", num: "3" },
               ].map(({ title, desc, num }) => (
                 <div key={num} className="flex gap-2 items-start p-3 rounded-xl bg-white border border-stone-200/80">
                   <div className="w-6 h-6 rounded-md bg-[#A01B1B]/10 flex items-center justify-center shrink-0 mt-0.5">
@@ -912,7 +899,7 @@ export default function Home() {
                     <div className="flex flex-col gap-3 sm:gap-4 animate-scale-in">
                       {/* Result tabs */}
                       <div className="border-b border-stone-200 flex">
-                        {([["final", "Wizualizacja AI"], ["composite", "Bez AI"], ["compare", "Porównanie"]] as [ResultTab, string][]).map(([tab, label]) => (
+                        {([["final", "Wizualizacja"], ["composite", "Surowy"], ["compare", "Porównanie"]] as [ResultTab, string][]).map(([tab, label]) => (
                           <button
                             key={tab}
                             type="button"
@@ -930,7 +917,7 @@ export default function Home() {
                       {resultTab === "compare" && (originalImageSrc || imageSrc) && renderData.refined ? (
                         <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} />
                       ) : resultTab === "final" && renderData.refined ? (
-                        <img src={renderData.refined} alt="Wizualizacja AI" className="rounded-xl w-full" />
+                        <img src={renderData.refined} alt="Wizualizacja" className="rounded-xl w-full" />
                       ) : resultTab === "composite" && renderData.composite ? (
                         <img src={renderData.composite} alt="Kompozyt" className="rounded-xl w-full" />
                       ) : (
@@ -948,7 +935,7 @@ export default function Home() {
                             <p className="text-[10px] text-stone-400">
                               Moduł: {selectedProduct.moduleWidthMm}×{selectedProduct.moduleHeightMm}mm
                               {renderData?.timings?.total && <> · {renderData.timings.total}s</>}
-                              {renderData?.geminiModel && <> · {renderData.geminiModel}</>}
+                              {renderData?.renderEngine && renderData.renderEngine !== "deterministic" && <> · {renderData.renderEngine}</>}
                             </p>
                           </div>
                         </div>
