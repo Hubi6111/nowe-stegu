@@ -1,5 +1,33 @@
 [
   {
+    "id": "20260414-055144-c703d9",
+    "timestamp": "2026-04-14 05:51:44",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.38,
+      "total": 0.4
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-055120-8334c4",
+    "timestamp": "2026-04-14 05:51:20",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-1",
+    "product_name": "Cambridge 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.16,
+      "total": 0.18
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-054834-c97188",
     "timestamp": "2026-04-14 05:48:34",
     "client_ip": "127.0.0.1",

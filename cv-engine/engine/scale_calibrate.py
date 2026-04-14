@@ -29,14 +29,22 @@ logger = logging.getLogger(__name__)
 
 # ADE20K 150-class indices for reference elements
 ADE20K = {
-    "wall": 0, "floor": 3, "ceiling": 5, "door": 14, "window": 8,
-    "person": 12, "cabinet": 10, "wardrobe": 35, "refrigerator": 49,
-    "sofa": 23, "chair": 19, "table": 15, "bed": 7,
+    "wall": 0, "building": 1, "sky": 2, "floor": 3, "tree": 4,
+    "ceiling": 5, "window": 8, "grass": 9, "person": 12,
+    "earth": 13, "door": 14, "table": 15, "mountain": 16,
+    "plant": 17, "chair": 19, "sofa": 23, "shelf": 24,
+    "desk": 33, "wardrobe": 35, "counter": 45,
+    "cabinet": 10, "refrigerator": 49, "bed": 7,
 }
+
+# Exterior indicator classes — if these are present, it's outdoor
+EXTERIOR_CLASSES = [ADE20K["sky"], ADE20K["tree"], ADE20K["grass"],
+                    ADE20K["earth"], ADE20K["mountain"], ADE20K["plant"]]
 
 # Standard European interior dimensions (cm)
 CEILING_HEIGHT_CM = 270.0
 DOOR_HEIGHT_CM = 200.0
+EXTERIOR_STOREY_CM = 300.0  # one storey exterior
 
 
 @dataclass
@@ -61,6 +69,67 @@ def calibrate_scale(
     """
     h, w = segmentation_argmax.shape
     refs: list[ScaleRef] = []
+
+    # ── 0. DETECT IF EXTERIOR ────────────────────────────────────────────
+    # Check for sky, trees, grass, earth, mountains → definite exterior
+    exterior_pixel_count = 0
+    for cls_id in EXTERIOR_CLASSES:
+        exterior_pixel_count += int((segmentation_argmax == cls_id).sum())
+    total_pixels = h * w
+    exterior_ratio = exterior_pixel_count / total_pixels
+    is_exterior = exterior_ratio > 0.02  # >2% of image is sky/tree/grass
+
+    if is_exterior:
+        logger.info(
+            "EXTERIOR DETECTED: %.1f%% of pixels are sky/tree/grass/earth",
+            exterior_ratio * 100,
+        )
+
+    # ── For EXTERIOR: always assume selection = 300cm, skip everything ──
+    if is_exterior and box:
+        box_h = box[3] - box[1]
+        ppc = float(box_h) / EXTERIOR_STOREY_CM
+        refs.append(ScaleRef(
+            name="exterior_storey",
+            height_px=box_h,
+            real_cm=EXTERIOR_STOREY_CM,
+            px_per_cm=ppc,
+            priority=1,  # Highest priority — this IS the answer
+        ))
+        logger.info(
+            "EXTERIOR: selection %dpx = %.0fcm (one storey) → px/cm=%.3f",
+            box_h, EXTERIOR_STOREY_CM, ppc,
+        )
+        # Skip all interior detection — go straight to result
+        wall_height_cm = EXTERIOR_STOREY_CM
+        confidence = "high"
+        method = "exterior_storey"
+
+        references = [{
+            "type": "exterior_storey",
+            "dimension": "height",
+            "measured_px": box_h,
+            "expected_cm": EXTERIOR_STOREY_CM,
+            "computed_px_per_cm": round(ppc, 3),
+            "confidence": 1.0,
+            "bbox": {"x": 0, "y": 0, "w": 0, "h": box_h},
+        }]
+
+        logger.info(
+            "FINAL SCALE (exterior): px/cm=%.3f → 8cm brick=%.0fpx, wall=%.0fcm",
+            ppc, ppc * 8.0, wall_height_cm,
+        )
+
+        return {
+            "px_per_cm": round(float(ppc), 4),
+            "wall_height_cm": round(float(wall_height_cm), 1),
+            "confidence": confidence,
+            "references": references,
+            "method": method,
+            "n_references": 1,
+        }
+
+    # ── INTERIOR PATH (below) ────────────────────────────────────────────
 
     # ── 1. CEILING-TO-FLOOR span (most reliable) ────────────────────────
     ceiling_mask = (segmentation_argmax == ADE20K["ceiling"]).astype(np.uint8)
@@ -309,26 +378,7 @@ def calibrate_scale(
                 bh, person_height_cm, ppc,
             )
 
-    # ── 6. EXTERIOR: no ceiling/floor → selection = 300cm (one storey) ───
-    is_exterior = (ceil_bottom is None and floor_top is None)
-
-    if is_exterior and box:
-        box_h = box[3] - box[1]
-        storey_cm = 300.0
-        ppc = float(box_h) / storey_cm
-        refs.append(ScaleRef(
-            name="exterior_storey",
-            height_px=box_h,
-            real_cm=storey_cm,
-            px_per_cm=ppc,
-            priority=5,
-        ))
-        logger.info(
-            "EXTERIOR: selection %dpx = %.0fcm (one storey) → px/cm=%.3f",
-            box_h, storey_cm, ppc,
-        )
-
-    # ── 7. ULTIMATE FALLBACK ────────────────────────────────────────────
+    # ── 6. ULTIMATE FALLBACK ────────────────────────────────────────────
     if not refs:
         ppc = float(h) / CEILING_HEIGHT_CM
         refs.append(ScaleRef(
@@ -375,10 +425,6 @@ def calibrate_scale(
 
     wall_height_cm = float(selection_height_px) / px_per_cm
 
-    # For exterior scenes, always enforce 300cm regardless of calculation
-    if is_exterior and best.name == "exterior_storey":
-        wall_height_cm = 300.0
-
     # Confidence
     if best.priority <= 2:
         confidence = "high"
@@ -402,9 +448,9 @@ def calibrate_scale(
         })
 
     logger.info(
-        "FINAL SCALE: px/cm=%.3f (method=%s, confidence=%s, exterior=%s) "
+        "FINAL SCALE (interior): px/cm=%.3f (method=%s, confidence=%s) "
         "→ 8cm brick=%.0fpx, wall=%.0fcm",
-        px_per_cm, method, confidence, is_exterior,
+        px_per_cm, method, confidence,
         px_per_cm * 8.0, wall_height_cm,
     )
 
