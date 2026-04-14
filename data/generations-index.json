@@ -1,5 +1,19 @@
 [
   {
+    "id": "20260414-043950-fb8047",
+    "timestamp": "2026-04-14 04:39:50",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.01,
+      "texture": 0.43,
+      "total": 0.45
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-042639-3d5336",
     "timestamp": "2026-04-14 04:26:39",
     "client_ip": "127.0.0.1",

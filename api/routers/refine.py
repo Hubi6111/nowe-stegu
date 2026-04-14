@@ -12,6 +12,7 @@ import re
 import time
 
 from fastapi import APIRouter, HTTPException
+from PIL import Image
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,10 @@ router = APIRouter(prefix="/api", tags=["refine"])
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 MODEL_ID = "gemini-3.1-flash-image-preview"
+
+# Max image dimension sent to Gemini (keeps payload under limits)
+MAX_DIM = 1024
+JPEG_QUALITY = 85
 
 
 class RefineRequest(BaseModel):
@@ -30,25 +35,40 @@ class RefineRequest(BaseModel):
     material_type: str  # e.g. "decorative brick cladding"
 
 
-def _strip_data_url(data_url: str) -> tuple[str, bytes]:
-    """Extract mime type and raw bytes from a data URL."""
-    match = re.match(r"data:([^;]+);base64,(.+)", data_url, re.DOTALL)
-    if match:
-        mime = match.group(1)
-        raw = base64.b64decode(match.group(2))
-        return mime, raw
-    # fallback: maybe it's just raw base64
-    raw = base64.b64decode(data_url)
-    return "image/jpeg", raw
+def _decode_image(data_url: str) -> Image.Image:
+    """Decode a data URL or raw base64 string into a PIL Image."""
+    # Strip data URL prefix if present
+    if "base64," in data_url:
+        raw_b64 = data_url.split("base64,", 1)[1]
+    else:
+        raw_b64 = data_url
+
+    raw_bytes = base64.b64decode(raw_b64)
+    return Image.open(io.BytesIO(raw_bytes)).convert("RGB")
 
 
-def _to_gemini_part(data_url: str) -> dict:
-    """Convert a data URL to a Gemini inline_data part."""
-    mime, raw = _strip_data_url(data_url)
+def _prepare_for_gemini(data_url: str, max_dim: int = MAX_DIM) -> dict:
+    """Decode, resize, re-encode as JPEG, and format as Gemini inline_data part."""
+    img = _decode_image(data_url)
+
+    # Resize if too large
+    w, h = img.size
+    if max(w, h) > max_dim:
+        ratio = max_dim / max(w, h)
+        new_w = int(w * ratio)
+        new_h = int(h * ratio)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        logger.info("Resized image %dx%d → %dx%d for Gemini", w, h, new_w, new_h)
+
+    # Encode as JPEG
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=JPEG_QUALITY)
+    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
     return {
         "inline_data": {
-            "mime_type": mime,
-            "data": base64.b64encode(raw).decode("ascii"),
+            "mime_type": "image/jpeg",
+            "data": b64,
         }
     }
 
@@ -92,17 +112,26 @@ async def refine_render(req: RefineRequest):
         material_type=req.material_type,
     )
 
+    # Prepare images — resize and re-encode as JPEG
+    try:
+        composite_part = _prepare_for_gemini(req.composite, max_dim=MAX_DIM)
+        original_part = _prepare_for_gemini(req.original, max_dim=MAX_DIM)
+        texture_part = _prepare_for_gemini(req.texture, max_dim=512)  # texture is smaller
+    except Exception as exc:
+        logger.error("Failed to prepare images: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Błąd przygotowania obrazów: {exc}")
+
     # Build the request payload for Gemini API
     payload = {
         "contents": [
             {
                 "parts": [
-                    {"text": "This is the COMPOSITE (computer-generated visualization):"},
-                    _to_gemini_part(req.composite),
-                    {"text": "This is the ORIGINAL photograph:"},
-                    _to_gemini_part(req.original),
-                    {"text": "This is the TEXTURE sample:"},
-                    _to_gemini_part(req.texture),
+                    {"text": "COMPOSITE (computer-generated visualization):"},
+                    composite_part,
+                    {"text": "ORIGINAL photograph:"},
+                    original_part,
+                    {"text": "TEXTURE sample:"},
+                    texture_part,
                     {"text": prompt},
                 ]
             }
@@ -118,42 +147,89 @@ async def refine_render(req: RefineRequest):
         f"{MODEL_ID}:generateContent?key={GEMINI_API_KEY}"
     )
 
-    t0 = time.time()
-    logger.info("Refine request started (model=%s, product=%s)", MODEL_ID, req.product_name)
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        resp = await client.post(url, json=payload)
-
-    elapsed = round(time.time() - t0, 1)
-    logger.info("Gemini refine response: %d in %.1fs", resp.status_code, elapsed)
-
-    if resp.status_code != 200:
-        detail = resp.text[:500]
-        logger.error("Gemini API error: %s", detail)
-        raise HTTPException(status_code=502, detail=f"Gemini API error: {detail}")
-
-    data = resp.json()
-
-    # Extract the image from the response
-    try:
-        candidates = data.get("candidates", [])
-        if not candidates:
-            raise ValueError("No candidates in response")
-
-        parts = candidates[0].get("content", {}).get("parts", [])
-        for part in parts:
-            if "inlineData" in part:
-                mime = part["inlineData"]["mimeType"]
-                img_b64 = part["inlineData"]["data"]
-                result_url = f"data:{mime};base64,{img_b64}"
-                logger.info("Refine complete: %.1fs, image returned", elapsed)
-                return {"image": result_url, "elapsed": elapsed}
-
-        raise ValueError("No image in response parts")
-
-    except Exception as exc:
-        logger.error("Failed to parse Gemini response: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Failed to parse Gemini response: {exc}",
+    # Retry up to 3 times
+    last_error = None
+    for attempt in range(3):
+        t0 = time.time()
+        logger.info(
+            "Refine request attempt %d/3 (model=%s, product=%s)",
+            attempt + 1, MODEL_ID, req.product_name,
         )
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(url, json=payload)
+
+            elapsed = round(time.time() - t0, 1)
+            logger.info("Gemini refine response: %d in %.1fs", resp.status_code, elapsed)
+
+            if resp.status_code == 200:
+                data = resp.json()
+                candidates = data.get("candidates", [])
+
+                if not candidates:
+                    last_error = "Brak wyników od modelu"
+                    logger.warning("No candidates, retrying...")
+                    continue
+
+                parts = candidates[0].get("content", {}).get("parts", [])
+                for part in parts:
+                    if "inlineData" in part:
+                        mime = part["inlineData"]["mimeType"]
+                        img_b64 = part["inlineData"]["data"]
+                        result_url = f"data:{mime};base64,{img_b64}"
+                        logger.info("Refine complete: %.1fs", elapsed)
+                        return {"image": result_url, "elapsed": elapsed}
+
+                # No image in response — might be safety filter or text-only
+                finish_reason = candidates[0].get("finishReason", "unknown")
+                if finish_reason == "IMAGE_SAFETY":
+                    last_error = "Obraz został odrzucony przez filtr bezpieczeństwa"
+                    logger.warning("Safety filter triggered")
+                    continue
+                else:
+                    last_error = f"Model nie wygenerował obrazu (reason: {finish_reason})"
+                    logger.warning("No image in parts, finish=%s", finish_reason)
+                    continue
+
+            elif resp.status_code == 429:
+                last_error = "Zbyt wiele żądań — spróbuj za chwilę"
+                wait = 5 * (attempt + 1)
+                logger.warning("Rate limited, waiting %ds...", wait)
+                import asyncio
+                await asyncio.sleep(wait)
+                continue
+
+            elif resp.status_code == 400:
+                detail = resp.text[:300]
+                logger.error("Gemini 400 error: %s", detail)
+                # Try reducing image size further
+                if attempt < 2:
+                    logger.info("Retrying with smaller images...")
+                    composite_part = _prepare_for_gemini(req.composite, max_dim=768)
+                    original_part = _prepare_for_gemini(req.original, max_dim=768)
+                    last_error = "Błąd przetwarzania — ponawiam z mniejszymi obrazami"
+                    continue
+                last_error = "Nie udało się przetworzyć obrazów"
+                break
+
+            else:
+                last_error = f"Błąd API (HTTP {resp.status_code})"
+                logger.error("Gemini API error %d: %s", resp.status_code, resp.text[:300])
+                if attempt < 2:
+                    continue
+                break
+
+        except httpx.TimeoutException:
+            elapsed = round(time.time() - t0, 1)
+            last_error = "Przekroczono czas oczekiwania — spróbuj ponownie"
+            logger.warning("Timeout after %.1fs on attempt %d", elapsed, attempt + 1)
+            continue
+        except Exception as exc:
+            last_error = f"Błąd połączenia: {exc}"
+            logger.error("Request failed: %s", exc)
+            if attempt < 2:
+                continue
+            break
+
+    raise HTTPException(status_code=502, detail=last_error or "Nie udało się wygenerować renderingu")

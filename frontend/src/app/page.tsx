@@ -440,14 +440,26 @@ export default function Home() {
       });
 
       if (!resp.ok) {
-        const err = await resp.text();
-        throw new Error(err);
+        let errorMsg = "Nie udało się wygenerować renderingu";
+        try {
+          const errData = await resp.json();
+          if (errData.detail) errorMsg = errData.detail;
+          else if (errData.error) {
+            // Parse nested JSON if present
+            try {
+              const nested = JSON.parse(errData.error);
+              errorMsg = nested.detail || errorMsg;
+            } catch { errorMsg = errData.error; }
+          }
+        } catch { /* use default */ }
+        throw new Error(errorMsg);
       }
 
       const data = await resp.json();
+      if (!data.image) throw new Error("Model nie wygenerował obrazu — spróbuj ponownie");
       setRefinedImage(data.image);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = err instanceof Error ? err.message : "Nieznany błąd — spróbuj ponownie";
       setRefineError(msg);
     } finally {
       setRefining(false);
