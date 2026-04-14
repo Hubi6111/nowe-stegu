@@ -32,6 +32,17 @@ class ProductOut(BaseModel):
     jointMm: int
     layoutType: str
     offsetRatio: float
+    category: str
+
+
+LAYOUT_TO_CATEGORY = {
+    "running-bond": "cegły",
+    "random-stone": "kamień",
+    "vertical-stack": "panele",
+    "stack-bond": "cegły",
+    "flemish-bond": "cegły",
+    "herringbone": "cegły",
+}
 
 
 def _load_product(folder: Path) -> ProductOut:
@@ -57,6 +68,7 @@ def _load_product(folder: Path) -> ProductOut:
         jointMm=raw["jointMm"],
         layoutType=raw["layoutType"],
         offsetRatio=raw["offsetRatio"],
+        category=LAYOUT_TO_CATEGORY.get(raw["layoutType"], "inne"),
     )
 
 

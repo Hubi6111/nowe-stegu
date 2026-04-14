@@ -22,6 +22,7 @@ interface Product {
   layoutType: string;
   offsetRatio: number;
   shopUrl: string;
+  category: string;
 }
 type Stage = "upload" | "edit" | "rendering" | "generated";
 interface ScaleInfo {
@@ -62,24 +63,6 @@ const INITIAL_STAGES: PipelineStage[] = [
   { id: "texture", label: "Nakładanie tekstury", status: "pending" },
 ];
 
-function StageIcon({ status }: { status: PipelineStage["status"] }) {
-  switch (status) {
-    case "done":
-      return <span className="text-emerald-500 text-sm">✓</span>;
-    case "running":
-      return (
-        <span className="inline-block w-3.5 h-3.5 border-2 border-[#A01B1B] border-t-transparent rounded-full animate-spin" />
-      );
-    case "error":
-      return <span className="text-red-500 text-sm">✗</span>;
-    case "warning":
-      return <span className="text-amber-500 text-sm">⚠</span>;
-    case "skipped":
-      return <span className="text-stone-300 text-sm">–</span>;
-    default:
-      return <span className="text-stone-300 text-sm">○</span>;
-  }
-}
 
 /* ── Image preparation (EXIF-safe, size-safe for Vercel) ── */
 
@@ -234,95 +217,73 @@ function AnimatedStatusText({ currentMessage }: { currentMessage?: string }) {
 }
 
 function PipelineStatusPanel({ stages, isOverlay }: { stages: PipelineStage[]; isOverlay?: boolean }) {
-  const [expandedAnalysis, setExpandedAnalysis] = useState(false);
   const currentRunning = stages.find(s => s.status === "running");
   const completedCount = stages.filter(s => s.status === "done" || s.status === "warning" || s.status === "skipped").length;
   const totalStages = stages.length;
   const hasErrors = stages.some(s => s.status === "error");
+  const errorStage = stages.find(s => s.status === "error");
+  const progress = Math.round((completedCount / totalStages) * 100);
 
-  // Find the analysis stage to show its data
-  const analysisStage = stages.find(s => s.id === "analysis");
-  const analysisData = analysisStage?.analysis as Record<string, unknown> | undefined;
-
-  const wrapperClass = isOverlay
-    ? "absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/92 backdrop-blur-xl rounded-2xl animate-fade-in p-6"
-    : "w-full";
+  if (!isOverlay) {
+    // Inline (non-overlay) — just show small progress
+    return (
+      <div className="w-full flex items-center gap-3 px-2">
+        <div className="grid grid-cols-3 gap-[2px] w-6 h-6 shrink-0">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div key={i} className="rounded-[1px] grid-loading-cell" style={{ animationDelay: `${i * 0.08}s` }} />
+          ))}
+        </div>
+        <div className="flex-1">
+          <div className="w-full h-1 bg-stone-200 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-[#A01B1B] rounded-full transition-all duration-700 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+        <span className="text-[10px] font-medium text-stone-400 tabular-nums shrink-0">{progress}%</span>
+      </div>
+    );
+  }
 
   return (
-    <div className={wrapperClass}>
-      {isOverlay && (
-        <>
-          {/* Grid loading animation */}
-          <div className="mb-5">
-            <div className="relative">
-              <div className="grid grid-cols-3 gap-[3px] w-14 h-14">
-                {Array.from({ length: 9 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="rounded-[2px] grid-loading-cell"
-                    style={{ animationDelay: `${i * 0.1}s` }}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* Stage counter */}
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-sm font-bold text-[#A01B1B] tabular-nums">{completedCount}/{totalStages}</span>
-            <div className="w-24 h-1 bg-stone-200 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-[#A01B1B] rounded-full transition-all duration-500 ease-out"
-                style={{ width: `${(completedCount / totalStages) * 100}%` }}
-              />
-            </div>
-          </div>
-
-          {/* Animated cycling status text */}
-          <div className="h-5 flex items-center mb-4">
-            <AnimatedStatusText currentMessage={currentRunning?.message || currentRunning?.label} />
-          </div>
-        </>
-      )}
-
-      <div className={`w-full ${isOverlay ? 'max-w-md' : ''}`}>
-        <div className="space-y-1">
-          {stages.map((s) => (
-            <div key={s.id} className={`flex items-start gap-2.5 px-3 py-1.5 rounded-lg transition-colors ${
-              s.status === "running" ? "bg-[#A01B1B]/5" : ""
-            }`}>
-              <div className="mt-0.5 w-4 flex-shrink-0 flex justify-center">
-                <StageIcon status={s.status} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className={`text-[11px] font-medium ${
-                    s.status === "running" ? "text-[#A01B1B]" :
-                    s.status === "error" ? "text-red-600" :
-                    s.status === "done" ? "text-stone-700" :
-                    "text-stone-400"
-                  }`}>
-                    {s.label}
-                  </span>
-                  {s.timing !== undefined && (
-                    <span className="text-[10px] text-stone-400 tabular-nums flex-shrink-0">
-                      {s.timing}s
-                    </span>
-                  )}
-                </div>
-                {s.detail && s.status !== "running" && (
-                  <p className="text-[10px] text-stone-400 mt-0.5 truncate">{s.detail}</p>
-                )}
-                {s.error && (
-                  <p className={`text-[10px] mt-0.5 ${s.status === "error" ? "text-red-500" : "text-amber-600"}`}>
-                    {s.error}
-                  </p>
-                )}
-              </div>
-            </div>
+    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-white/95 backdrop-blur-2xl rounded-2xl animate-fade-in p-8">
+      {/* Grid loading animation */}
+      <div className="mb-8">
+        <div className="grid grid-cols-3 gap-[4px] w-16 h-16">
+          {Array.from({ length: 9 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded-[3px] grid-loading-cell"
+              style={{ animationDelay: `${i * 0.1}s` }}
+            />
           ))}
         </div>
       </div>
+
+      {/* Progress bar — wide and smooth */}
+      <div className="w-48 mb-5">
+        <div className="w-full h-[3px] bg-stone-100 rounded-full overflow-hidden">
+          <div
+            className="h-full rounded-full transition-all duration-700 ease-out"
+            style={{
+              width: `${progress}%`,
+              background: 'linear-gradient(90deg, #A01B1B, #c93434)',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Animated status text */}
+      {hasErrors ? (
+        <p className="text-sm text-red-500 font-medium text-center px-4">
+          {errorStage?.error || "Wystąpił błąd. Spróbuj ponownie."}
+        </p>
+      ) : (
+        <div className="h-6 flex items-center">
+          <AnimatedStatusText currentMessage={currentRunning?.message || currentRunning?.label} />
+        </div>
+      )}
     </div>
   );
 }
@@ -425,7 +386,7 @@ export default function Home() {
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number; unlimited: boolean } | null>(null);
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(INITIAL_STAGES);
-  const [debugOpen, setDebugOpen] = useState(false);
+
 
   const fetchRemaining = useCallback(() => {
     fetch(`${API_BASE}/api/remaining-generations`)
@@ -525,7 +486,7 @@ export default function Home() {
     setRenderData(null);
     setGenProgress("Przygotowywanie obrazu…");
     setPipelineStages(INITIAL_STAGES.map(s => ({ ...s, status: "pending" as const })));
-    setDebugOpen(false);
+
 
     try {
       const imageBase64 = await prepareImageForUpload(imageSrc);
@@ -706,13 +667,77 @@ export default function Home() {
 
   const step = stage === "upload" ? 1 : stage === "edit" ? 2 : stage === "rendering" ? 3 : 4;
 
+  /* ── Category icons ── */
+  const CategoryIcon = ({ cat, className = "" }: { cat: string; className?: string }) => {
+    const cls = `w-4 h-4 ${className}`;
+    switch (cat) {
+      case "cegły":
+        return (
+          <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2" y="4" width="20" height="5" rx="1" /><rect x="2" y="11" width="9" height="5" rx="1" /><rect x="13" y="11" width="9" height="5" rx="1" /><rect x="6" y="18" width="14" height="3" rx="1" />
+          </svg>
+        );
+      case "kamień":
+        return (
+          <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 8c0-1 1-3 4-3s3 2 5 2 3-2 5-2 4 1 4 3v7c0 2-2 4-4 4H8c-2 0-4-2-4-4V8z" />
+            <path d="M8 13h3M14 10h2" />
+          </svg>
+        );
+      case "panele":
+        return (
+          <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="4" height="18" rx="1" /><rect x="10" y="3" width="4" height="18" rx="1" /><rect x="17" y="3" width="4" height="18" rx="1" />
+          </svg>
+        );
+      default:
+        return (
+          <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M9 21V9" />
+          </svg>
+        );
+    }
+  };
+
   /* ── Product grid (reused in sidebar + mobile sheet) ── */
+
+  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+
+  const toggleCategory = useCallback((cat: string) => {
+    setOpenCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+  }, []);
+
+  // Group products by category
+  const grouped = products.reduce<Record<string, Product[]>>((acc, p) => {
+    const cat = p.category || "inne";
+    if (!acc[cat]) acc[cat] = [];
+    acc[cat].push(p);
+    return acc;
+  }, {});
+
+  // Ensure all categories start as open
+  useEffect(() => {
+    if (products.length > 0 && Object.keys(openCategories).length === 0) {
+      const initial: Record<string, boolean> = {};
+      Object.keys(grouped).forEach(cat => { initial[cat] = true; });
+      setOpenCategories(initial);
+    }
+  }, [products.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const CATEGORY_ORDER = ["cegły", "kamień", "panele", "inne"];
 
   const ProductGrid = ({ onPick }: { onPick?: () => void }) => (
     <>
       {productsLoading ? (
-        <div className="grid grid-cols-3 sm:grid-cols-2 gap-2.5">
-          {[0,1,2,3].map(i => <div key={i} className="aspect-square rounded-xl animate-shimmer" />)}
+        <div className="space-y-3">
+          {[0,1].map(i => (
+            <div key={i} className="rounded-xl border border-stone-100 p-3">
+              <div className="h-4 w-24 rounded animate-shimmer mb-2" />
+              <div className="grid grid-cols-3 sm:grid-cols-2 gap-2">
+                {[0,1].map(j => <div key={j} className="aspect-square rounded-lg animate-shimmer" />)}
+              </div>
+            </div>
+          ))}
         </div>
       ) : products.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-10 text-center">
@@ -720,15 +745,59 @@ export default function Home() {
           <p className="text-xs text-stone-300 mt-1">Dodaj produkty w panelu administracyjnym</p>
         </div>
       ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-2 gap-2.5">
-          {products.map(p => (
-            <ProductCard
-              key={p.productId}
-              product={p}
-              active={selectedProduct?.productId === p.productId}
-              onSelect={() => { setSelectedProduct(p); onPick?.(); }}
-            />
-          ))}
+        <div className="space-y-2">
+          {CATEGORY_ORDER.filter(cat => grouped[cat]).map(cat => {
+            const prods = grouped[cat];
+            const isOpen = openCategories[cat] !== false;
+            const hasSelected = prods.some(p => selectedProduct?.productId === p.productId);
+
+            return (
+              <div key={cat} className={`rounded-xl border transition-colors ${
+                hasSelected ? "border-[#A01B1B]/20 bg-[#A01B1B]/[0.02]" : "border-stone-100 bg-white"
+              }`}>
+                {/* Category header */}
+                <button
+                  type="button"
+                  onClick={() => toggleCategory(cat)}
+                  className="w-full flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-stone-50/50 rounded-xl transition-colors"
+                >
+                  <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
+                    hasSelected ? "bg-[#A01B1B]/10" : "bg-stone-100"
+                  }`}>
+                    <CategoryIcon cat={cat} className={hasSelected ? "text-[#A01B1B]" : "text-stone-400"} />
+                  </div>
+                  <div className="flex-1 text-left">
+                    <p className={`text-[11px] font-semibold leading-tight capitalize ${
+                      hasSelected ? "text-[#A01B1B]" : "text-stone-600"
+                    }`}>{cat}</p>
+                    <p className="text-[9px] text-stone-400 mt-0.5">{prods.length} {prods.length === 1 ? "produkt" : prods.length < 5 ? "produkty" : "produktów"}</p>
+                  </div>
+                  <svg
+                    className={`w-3.5 h-3.5 text-stone-300 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+                    viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"
+                  >
+                    <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+
+                {/* Products */}
+                {isOpen && (
+                  <div className="px-2.5 pb-2.5">
+                    <div className="grid grid-cols-3 sm:grid-cols-2 gap-2">
+                      {prods.map(p => (
+                        <ProductCard
+                          key={p.productId}
+                          product={p}
+                          active={selectedProduct?.productId === p.productId}
+                          onSelect={() => { setSelectedProduct(p); onPick?.(); }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </>
@@ -933,42 +1002,13 @@ export default function Home() {
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-semibold text-stone-700">{selectedProduct.name}</p>
                             <p className="text-[10px] text-stone-400">
-                              Moduł: {selectedProduct.moduleWidthMm}×{selectedProduct.moduleHeightMm}mm
-                              {renderData?.timings?.total && <> · {renderData.timings.total}s</>}
-                              {renderData?.renderEngine && renderData.renderEngine !== "deterministic" && <> · {renderData.renderEngine}</>}
+                              {selectedProduct.moduleWidthMm}×{selectedProduct.moduleHeightMm}mm
                             </p>
                           </div>
                         </div>
                       )}
 
-                      {/* Pipeline debug panel */}
-                      <div className="border border-stone-200 rounded-xl overflow-hidden">
-                        <button
-                          type="button"
-                          onClick={() => setDebugOpen(!debugOpen)}
-                          className="w-full flex items-center justify-between px-3 py-2 bg-stone-50 hover:bg-stone-100 transition-colors cursor-pointer"
-                        >
-                          <span className="flex items-center gap-2 text-[11px] font-semibold text-stone-600">
-                            <span>📊</span>
-                            <span>Szczegóły pipeline</span>
-                            {pipelineStages.some(s => s.status === "error") && (
-                              <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-red-100 text-red-600 rounded">BŁĘDY</span>
-                            )}
-                            {pipelineStages.some(s => s.status === "warning") && !pipelineStages.some(s => s.status === "error") && (
-                              <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold bg-amber-100 text-amber-600 rounded">OSTRZEŻENIA</span>
-                            )}
-                          </span>
-                          <span className="text-[10px] text-stone-400">
-                            {renderData?.timings?.total && `${renderData.timings.total}s · `}
-                            {debugOpen ? "▲" : "▼"}
-                          </span>
-                        </button>
-                        {debugOpen && (
-                          <div className="border-t border-stone-100 py-2">
-                            <PipelineStatusPanel stages={pipelineStages} />
-                          </div>
-                        )}
-                      </div>
+
                     </div>
                   )}
                 </div>
