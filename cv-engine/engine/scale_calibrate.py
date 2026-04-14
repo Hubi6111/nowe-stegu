@@ -371,55 +371,114 @@ def calibrate_scale(
         confidence=0.15,
     ))
 
-    # ── 6. Outlier rejection + weighted average ──────────────────────────
-    px_per_cm_values = [d.px_per_cm for d in detections if d.confidence >= 0.3]
+    # ── 6. Determine best px_per_cm ────────────────────────────────────────
+    # PRIORITY ORDER:
+    #   1. Door height (200cm) — most reliable, gives exact brick count
+    #   2. Ceiling-to-floor span (270cm) — very reliable
+    #   3. Multiple medium-confidence refs — cross-validated average
+    #   4. Any single reference — use it
+    #   5. Image height fallback — last resort
 
-    if len(px_per_cm_values) >= 3:
-        # Reject outliers: remove estimates outside 1.5x IQR
-        sorted_vals = sorted(px_per_cm_values)
-        q1 = sorted_vals[len(sorted_vals) // 4]
-        q3 = sorted_vals[3 * len(sorted_vals) // 4]
-        iqr = q3 - q1
-        lower = q1 - 1.5 * iqr
-        upper = q3 + 1.5 * iqr
+    # Separate detections by reliability tier
+    architectural = [d for d in detections
+                     if d.type in ("door",) and d.dimension == "height"
+                     and d.confidence >= 0.7]
+    room_span = [d for d in detections
+                 if d.type == "ceiling_to_floor" and d.confidence >= 0.7]
+    furniture = [d for d in detections
+                 if d.confidence >= 0.45
+                 and d.type not in ("wall_height_heuristic", "image_height_fallback",
+                                     "ceiling_to_floor", "door")]
+    heuristics = [d for d in detections
+                  if d.type in ("wall_height_heuristic", "image_height_fallback")]
 
-        for det in detections:
-            if det.px_per_cm < lower or det.px_per_cm > upper:
-                logger.info(
-                    "Outlier rejected: %s px/cm=%.3f (range: %.3f–%.3f)",
-                    det.type, det.px_per_cm, lower, upper,
-                )
-                det.confidence *= 0.1  # effectively remove from average
-
-    # Weighted average
-    total_weight = sum(d.confidence for d in detections)
-    if total_weight < 0.01:
-        weighted_px_per_cm = fallback_px_per_cm
-    else:
-        weighted_px_per_cm = sum(
-            d.px_per_cm * d.confidence for d in detections
-        ) / total_weight
-
-    # ── 7. Confidence determination ──────────────────────────────────────
-    high_conf = [d for d in detections if d.confidence >= 0.85]
-    med_conf = [d for d in detections if d.confidence >= 0.55]
-    n_significant = len([d for d in detections if d.confidence >= 0.4])
-
-    if high_conf:
+    if architectural:
+        # BEST CASE: door detected — use it directly
+        # Door = 200cm. With 8cm bricks → 25 bricks fit in door height.
+        # If multiple doors, average them (they should agree).
+        total_w = sum(d.confidence for d in architectural)
+        weighted_px_per_cm = sum(d.px_per_cm * d.confidence for d in architectural) / total_w
         confidence = "high"
-        method = high_conf[0].type
-    elif len(med_conf) >= 2:
-        confidence = "high"  # multiple medium = high
-        method = "multi_reference"
-    elif med_conf:
+        method = "door"
+        logger.info(
+            "PRIORITY: Using door reference directly → px/cm=%.3f "
+            "(from %d door detection(s))",
+            weighted_px_per_cm, len(architectural),
+        )
+
+    elif room_span:
+        # GOOD: ceiling-to-floor span detected
+        best = max(room_span, key=lambda d: d.confidence)
+        weighted_px_per_cm = best.px_per_cm
+
+        # Cross-validate with furniture if available
+        if furniture:
+            furn_avg = sum(d.px_per_cm for d in furniture) / len(furniture)
+            deviation = abs(furn_avg - weighted_px_per_cm) / max(weighted_px_per_cm, 0.01)
+            if deviation < 0.25:
+                # Furniture agrees — blend slightly
+                weighted_px_per_cm = weighted_px_per_cm * 0.75 + furn_avg * 0.25
+                logger.info("Room span + furniture agree (dev=%.1f%%), blended", deviation * 100)
+
+        confidence = "high"
+        method = "ceiling_to_floor"
+        logger.info("PRIORITY: Using ceiling-to-floor → px/cm=%.3f", weighted_px_per_cm)
+
+    elif len(furniture) >= 2:
+        # OK: multiple furniture refs — cross-validate
+        # Reject outliers first
+        vals = sorted(d.px_per_cm for d in furniture)
+        if len(vals) >= 3:
+            q1 = vals[len(vals) // 4]
+            q3 = vals[3 * len(vals) // 4]
+            iqr = q3 - q1
+            lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
+            furniture = [d for d in furniture if lower <= d.px_per_cm <= upper]
+
+        if furniture:
+            total_w = sum(d.confidence for d in furniture)
+            weighted_px_per_cm = sum(d.px_per_cm * d.confidence for d in furniture) / total_w
+        else:
+            weighted_px_per_cm = fallback_px_per_cm
         confidence = "medium"
-        method = med_conf[0].type
-    elif n_significant >= 2:
-        confidence = "medium"
         method = "multi_reference"
+        logger.info("Using %d furniture references → px/cm=%.3f", len(furniture), weighted_px_per_cm)
+
+    elif furniture:
+        # Single furniture ref
+        best = max(furniture, key=lambda d: d.confidence)
+        weighted_px_per_cm = best.px_per_cm
+        confidence = "medium"
+        method = best.type
+        logger.info("Using single reference '%s' → px/cm=%.3f", best.type, weighted_px_per_cm)
+
     else:
+        # Fallback: use heuristics or image-level estimate
+        if heuristics:
+            best = max(heuristics, key=lambda d: d.confidence)
+            weighted_px_per_cm = best.px_per_cm
+            method = best.type
+        else:
+            weighted_px_per_cm = fallback_px_per_cm
+            method = "image_height_fallback"
         confidence = "low"
-        method = "weighted_average"
+        logger.info("FALLBACK: Using '%s' → px/cm=%.3f", method, weighted_px_per_cm)
+
+    # ── 7. Sanity check against room proportions ─────────────────────────
+    # If ceiling-to-floor is visible, the wall height should be <= 280cm
+    if ceil_bottom is not None and floor_top is not None:
+        room_height_px = floor_top - ceil_bottom
+        if room_height_px > 50:
+            implied_room_cm = room_height_px / weighted_px_per_cm
+            if implied_room_cm < 200 or implied_room_cm > 400:
+                logger.warning(
+                    "Sanity check: implied room height %.0fcm is unreasonable "
+                    "(expected 220-300cm), adjusting",
+                    implied_room_cm,
+                )
+                # Correct toward 270cm
+                corrected = float(room_height_px) / 270.0
+                weighted_px_per_cm = weighted_px_per_cm * 0.3 + corrected * 0.7
 
     # ── 8. Compute wall height from calibration ──────────────────────────
     if box:
