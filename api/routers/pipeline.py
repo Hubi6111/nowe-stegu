@@ -371,7 +371,6 @@ async def render_final(req: RenderFinalRequest, request: Request):
         except Exception as wm_exc:
             logger.warning("Watermark failed (non-fatal): %s", wm_exc)
 
-    increment_usage(client_ip)
     results["timings"]["total"] = round(time.time() - t0, 2)
     results["image_width"] = image.width
     results["image_height"] = image.height
@@ -514,7 +513,6 @@ async def render_stream(req: RenderFinalRequest, request: Request):
             pass
 
         # ── Save & finalize ───────────────────────────────────────────────
-        increment_usage(client_ip)
         timings["total"] = round(time.time() - t0, 2)
 
         try:

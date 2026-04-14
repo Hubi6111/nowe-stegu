@@ -14,9 +14,12 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from PIL import Image
 from pydantic import BaseModel
+
+from services.admin_store import increment_usage
+from routers.pipeline import _apply_watermark
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +120,7 @@ async def refine_status():
 
 
 @router.post("/refine")
-async def refine_render(req: RefineRequest):
+async def refine_render(req: RefineRequest, request: Request):
     """Refine a composite render using Gemini image editing.
 
     All images are loaded from disk:
@@ -215,6 +218,23 @@ async def refine_render(req: RefineRequest):
                     if "inlineData" in part:
                         mime = part["inlineData"]["mimeType"]
                         img_b64 = part["inlineData"]["data"]
+
+                        # Apply watermark
+                        try:
+                            raw = base64.b64decode(img_b64)
+                            result_img = Image.open(io.BytesIO(raw)).convert("RGB")
+                            watermarked = _apply_watermark(result_img)
+                            buf = io.BytesIO()
+                            watermarked.save(buf, format="JPEG", quality=92)
+                            img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+                            mime = "image/jpeg"
+                        except Exception as wm_exc:
+                            logger.warning("Watermark failed (non-fatal): %s", wm_exc)
+
+                        # Count usage
+                        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+                        increment_usage(client_ip)
+
                         return {"image": f"data:{mime};base64,{img_b64}", "elapsed": elapsed}
 
                 finish_reason = candidates[0].get("finishReason", "unknown")
