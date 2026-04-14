@@ -349,6 +349,16 @@ async def render_final(req: RenderFinalRequest, request: Request):
     # Use composite as final result (no AI)
     results["refined"] = composite_b64
 
+    # ── Save images to disk for refine endpoint ───────────────────────────
+    try:
+        refine_dir = Path(os.environ.get("DATA_DIR", "./data")) / "refine-temp"
+        refine_dir.mkdir(parents=True, exist_ok=True)
+        image.save(refine_dir / "original.jpg", "JPEG", quality=92)
+        composite.save(refine_dir / "composite.jpg", "JPEG", quality=92)
+        logger.info("Saved refine images: %s", refine_dir)
+    except Exception as save_exc:
+        logger.warning("Failed to save refine images: %s", save_exc)
+
     # ── Watermark ─────────────────────────────────────────────────────────
     if results.get("refined"):
         try:

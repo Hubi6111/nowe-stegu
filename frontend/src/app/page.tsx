@@ -418,13 +418,11 @@ export default function Home() {
     }, 5000);
 
     try {
-      // Send directly to Python API (bypass Next.js proxy — body too large)
+      // Images loaded from disk by backend — only send product info
       const resp = await fetch(`${API_BASE}/api/refine`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          composite: renderData.refined,
-          original: originalImageSrc || imageSrc,
           product_id: selectedProduct.productId,
           product_name: selectedProduct.name,
           material_type: selectedProduct.layoutType,
@@ -450,7 +448,7 @@ export default function Home() {
       setRefining(false);
       if (refineIntervalRef.current) clearInterval(refineIntervalRef.current);
     }
-  }, [renderData, selectedProduct, originalImageSrc, imageSrc]);
+  }, [renderData, selectedProduct]);
 
 
   const fetchRemaining = useCallback(() => {
