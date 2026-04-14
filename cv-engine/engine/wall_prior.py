@@ -100,20 +100,33 @@ def predict_full(image: Image.Image) -> dict:
     floor_prob = probs_np[ADE20K_FLOOR]
     ceiling_prob = probs_np[ADE20K_CEILING]
 
-    # Build exclusion mask: any pixel where excluded class has highest prob
+    # Build exclusion mask — ONLY for very confident non-wall areas.
+    # We must be careful NOT to exclude shadowed wall areas that SegFormer
+    # might misclassify. Only exclude when:
+    # 1. The argmax class is definitely not wall AND
+    # 2. The wall probability is very low AND
+    # 3. The non-wall class probability is high
     exclude_mask = np.zeros((image.height, image.width), dtype=np.uint8)
-    for cls_idx in EXCLUDE_CLASSES:
-        exclude_mask[argmax == cls_idx] = 255
 
-    # Also exclude areas where floor/ceiling probability > 0.15
-    # even if not the argmax (catches transition zones)
-    exclude_mask[(floor_prob > 0.15) | (ceiling_prob > 0.15)] = 255
+    # Hard exclusion: non-wall class is dominant AND wall prob is very low
+    for cls_idx in EXCLUDE_CLASSES:
+        class_confident = (argmax == cls_idx)
+        wall_very_low = (wall_prob < 0.10)
+        class_prob_high = (probs_np[cls_idx] > 0.5)
+        exclude_mask[class_confident & wall_very_low & class_prob_high] = 255
+
+    # Soft exclusion mask (float 0-1) for gentler suppression in pipeline
+    # This gives a continuous "how non-wall is this pixel" signal
+    soft_exclude = np.zeros((image.height, image.width), dtype=np.float32)
+    soft_exclude = np.maximum(soft_exclude, np.clip(floor_prob - wall_prob, 0, 1))
+    soft_exclude = np.maximum(soft_exclude, np.clip(ceiling_prob - wall_prob, 0, 1))
 
     return {
         "wall_prob": wall_prob.astype(np.float32),
         "floor_prob": floor_prob.astype(np.float32),
         "ceiling_prob": ceiling_prob.astype(np.float32),
         "exclude_mask": exclude_mask,
+        "soft_exclude": soft_exclude,
         "argmax": argmax,
     }
 

@@ -373,18 +373,44 @@ def _boundary_points(
 def _select_best_mask(
     masks: np.ndarray, reference: np.ndarray
 ) -> int:
-    """Select the mask with highest IoU with the reference mask."""
+    """Select the best mask using a combined recall + coverage score.
+
+    Pure IoU penalizes larger masks (shadows, extended wall areas).
+    Instead we score by:
+    - recall: how much of the reference is covered (most important)
+    - size_bonus: bonus for being larger (captures shadows)
+    - penalty: deduction if mask extends far beyond reference
+    """
     ref_binary = reference > 127
-    best_iou = -1
+    ref_count = max(ref_binary.sum(), 1)
+    best_score = -1
     best_idx = 0
 
     for i, m in enumerate(masks):
         m_binary = m > 0.5
+        m_count = max(m_binary.sum(), 1)
+
         intersection = (m_binary & ref_binary).sum()
-        union = (m_binary | ref_binary).sum()
-        iou = intersection / max(union, 1)
-        if iou > best_iou:
-            best_iou = iou
+        recall = intersection / ref_count  # how much reference is captured
+        precision = intersection / m_count  # how much of mask is reference
+
+        # Size ratio: mask vs reference (>1 means larger)
+        size_ratio = m_count / ref_count
+
+        # Score: prioritize recall, reward moderate expansion, penalize extreme
+        if size_ratio > 3.0:
+            # Mask is 3x+ the reference — probably wrong
+            score = recall * 0.3
+        elif size_ratio > 1.5:
+            # Moderately larger — mild bonus (shadow recovery)
+            score = recall * 1.1
+        else:
+            # Similar size or smaller — standard IoU-like
+            score = recall * (0.7 + 0.3 * precision)
+
+        if score > best_score:
+            best_score = score
             best_idx = i
 
     return best_idx
+

@@ -1,5 +1,75 @@
 [
   {
+    "id": "20260414-023233-5ef8f0",
+    "timestamp": "2026-04-14 02:32:33",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.15,
+      "total": 0.16
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-023204-ea6b85",
+    "timestamp": "2026-04-14 02:32:04",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.21,
+      "total": 0.22
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-023111-dfd050",
+    "timestamp": "2026-04-14 02:31:11",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.17,
+      "total": 0.18
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-023013-9d0876",
+    "timestamp": "2026-04-14 02:30:13",
+    "client_ip": "127.0.0.1",
+    "product_id": "country-610",
+    "product_name": "Country 610",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.33,
+      "total": 0.34
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-022943-c0b8d2",
+    "timestamp": "2026-04-14 02:29:43",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.31,
+      "total": 0.32
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-022900-aeb212",
     "timestamp": "2026-04-14 02:29:00",
     "client_ip": "127.0.0.1",

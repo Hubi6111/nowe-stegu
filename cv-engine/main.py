@@ -183,6 +183,96 @@ def render_mask_overlay(image: Image.Image, mask: np.ndarray) -> Image.Image:
     return Image.fromarray(overlay)
 
 
+def _grabcut_refine(
+    image: Image.Image,
+    mask: np.ndarray,
+    box_mask: np.ndarray,
+    n_iter: int = 3,
+) -> np.ndarray:
+    """Refine mask boundaries using GrabCut.
+
+    GrabCut uses color statistics to snap mask edges to actual image edges.
+    This handles shadows (same color as wall = kept in mask) and objects
+    (different color = excluded from mask) naturally.
+
+    Args:
+        image: RGB PIL image
+        mask: Current binary mask (uint8 0/255)
+        box_mask: Box constraint mask (uint8 0/255)
+        n_iter: GrabCut iterations
+
+    Returns:
+        Refined binary mask (uint8, 0/255)
+    """
+    img_bgr = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
+    h, w = mask.shape
+
+    # Build GrabCut initialization mask:
+    # GC_BGD=0 (definite background)
+    # GC_FGD=1 (definite foreground)
+    # GC_PR_BGD=2 (probable background)
+    # GC_PR_FGD=3 (probable foreground)
+    gc_mask = np.full((h, w), cv2.GC_BGD, dtype=np.uint8)
+
+    # Outside box = definite background
+    # Inside box but outside mask = probable background
+    gc_mask[box_mask > 127] = cv2.GC_PR_BGD
+
+    # Erode mask to get definite foreground (interior of wall)
+    kernel_erode = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    eroded = cv2.erode(mask, kernel_erode, iterations=2)
+    gc_mask[eroded > 127] = cv2.GC_FGD
+
+    # Dilate mask to get probable foreground (wall boundary zone)
+    kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    dilated = cv2.dilate(mask, kernel_dilate, iterations=2)
+    # Boundary zone = dilated - eroded = probable foreground
+    boundary = (dilated > 127) & (eroded < 128) & (box_mask > 127)
+    gc_mask[boundary] = cv2.GC_PR_FGD
+
+    # Need enough definite FG pixels for GrabCut to work
+    if (gc_mask == cv2.GC_FGD).sum() < 100:
+        return mask
+
+    bgd_model = np.zeros((1, 65), np.float64)
+    fgd_model = np.zeros((1, 65), np.float64)
+
+    try:
+        cv2.grabCut(
+            img_bgr, gc_mask, None,
+            bgd_model, fgd_model,
+            n_iter,
+            cv2.GC_INIT_WITH_MASK,
+        )
+    except cv2.error:
+        return mask
+
+    # Result: foreground = GC_FGD or GC_PR_FGD
+    result = np.where(
+        (gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD),
+        255, 0
+    ).astype(np.uint8)
+
+    # Safety: GrabCut result should not be dramatically different from input
+    # If it removed more than 40% of the original mask, something went wrong
+    original_pixels = mask.sum() // 255
+    result_pixels = result.sum() // 255
+    if result_pixels < original_pixels * 0.6:
+        logger.warning(
+            "GrabCut removed too much (%.0f%% loss), keeping original mask",
+            (1 - result_pixels / max(original_pixels, 1)) * 100,
+        )
+        return mask
+
+    logger.info(
+        "GrabCut refinement: %d → %d pixels (%.1f%% change)",
+        original_pixels, result_pixels,
+        (result_pixels - original_pixels) / max(original_pixels, 1) * 100,
+    )
+
+    return result
+
+
 # ── MAIN ENDPOINT: Smart Wall Mask ────────────────────────────────────────────
 
 @app.post("/wall-mask")
@@ -217,6 +307,7 @@ async def wall_mask_endpoint(req: WallMaskRequest):
     seg_result = wall_prior.predict_full(image)
     wall_prob = seg_result["wall_prob"]
     exclude_mask = seg_result["exclude_mask"]
+    soft_exclude = seg_result["soft_exclude"]
     floor_prob = seg_result["floor_prob"]
     ceiling_prob = seg_result["ceiling_prob"]
     _warmup_status["wall_prior"] = True
@@ -229,29 +320,48 @@ async def wall_mask_endpoint(req: WallMaskRequest):
     box_pixels = (y2 - y1) * (x2 - x1)
 
     # ── Build coarse wall mask ────────────────────────────────────────────
+    # Key insight: shadows reduce wall_prob but the wall is still there.
+    # Use gentle suppression instead of hard cuts.
     wall_in_box = wall_prob.copy()
     wall_in_box[box_mask == 0] = 0
 
-    # Remove exclusion zones from wall probability
+    # Only zero out pixels with hard exclusion (very confident non-wall)
     wall_in_box[exclude_mask > 127] = 0
 
-    # Suppress floor/ceiling with soft threshold
-    wall_in_box[floor_prob > 0.10] *= 0.1
-    wall_in_box[ceiling_prob > 0.10] *= 0.1
+    # Gentle suppression using soft_exclude (floor/ceiling prob > wall prob)
+    # Instead of hard kill, multiply by (1 - soft_exclude) to dampen
+    suppression = np.clip(1.0 - soft_exclude * 0.7, 0.3, 1.0)
+    wall_in_box *= suppression
 
-    # Adaptive threshold based on peak probability in box
-    max_prob = wall_in_box.max()
-    if max_prob > 0.5:
-        threshold = max(0.15, max_prob * 0.3)
+    # Adaptive threshold: use percentile-based approach
+    # This captures shadows that have lower but still positive wall probability
+    max_prob_in_box = wall_in_box[y1:y2, x1:x2].max()
+    if max_prob_in_box > 0.5:
+        # Good confidence: use 20% of peak or 0.12, whichever is lower
+        threshold = min(0.12, max(0.08, max_prob_in_box * 0.20))
+    elif max_prob_in_box > 0.2:
+        threshold = 0.06
     else:
-        threshold = 0.10
+        threshold = 0.04
 
     coarse_mask = (wall_in_box > threshold).astype(np.uint8) * 255
 
+    # Shadow recovery: grow the coarse mask into nearby uncertain areas
+    # If a pixel has wall_prob > 0.03 and is adjacent to confident wall,
+    # it's likely a shadowed part of the same wall.
+    uncertain_mask = ((wall_prob > 0.03) & (box_mask > 0)).astype(np.uint8) * 255
+    uncertain_mask[exclude_mask > 127] = 0
+
+    # Dilate coarse mask and intersect with uncertain areas
+    grow_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    grown = cv2.dilate(coarse_mask, grow_kernel, iterations=3)
+    shadow_recovery = cv2.bitwise_and(grown, uncertain_mask)
+    coarse_mask = cv2.bitwise_or(coarse_mask, shadow_recovery)
+
     # If wall prior found very little, fall back to box minus exclusions
     wall_pixel_count = coarse_mask.sum() / 255
-    if wall_pixel_count < box_pixels * 0.08:
-        logger.warning("Wall prior found <8%% wall in box, using box - exclusions")
+    if wall_pixel_count < box_pixels * 0.05:
+        logger.warning("Wall prior found <5%% wall in box, using box - exclusions")
         coarse_mask = box_mask.copy()
         coarse_mask[exclude_mask > 127] = 0
 
@@ -274,7 +384,9 @@ async def wall_mask_endpoint(req: WallMaskRequest):
     timings["sam2_refine"] = round(time.time() - t2, 2)
     logger.info("Stage 2 (SAM2 refine 2-iter): %.2fs", timings["sam2_refine"])
 
-    # Clip to box and re-apply exclusion zones
+    # Clip to box — but do NOT re-apply exclude_mask here.
+    # SAM2 has better spatial understanding than SegFormer's exclusion.
+    # Only apply the hard exclusion (very confident floor/ceiling).
     refined = np.minimum(refined, box_mask)
     refined[exclude_mask > 127] = 0
 
@@ -292,8 +404,10 @@ async def wall_mask_endpoint(req: WallMaskRequest):
                      timings["foreground"], fg_mask.sum() // 255)
 
         if fg_mask.sum() > 0:
-            kernel = np.ones((7, 7), np.uint8)
-            fg_dilated = cv2.dilate(fg_mask, kernel, iterations=2)
+            # Minimal dilation — just 1px to avoid sub-pixel leaks
+            # SAM2 already gives precise object boundaries
+            kernel = np.ones((3, 3), np.uint8)
+            fg_dilated = cv2.dilate(fg_mask, kernel, iterations=1)
             refined = np.clip(
                 refined.astype(np.int16) - fg_dilated.astype(np.int16),
                 0, 255,
@@ -303,38 +417,40 @@ async def wall_mask_endpoint(req: WallMaskRequest):
         fg_mask = np.zeros((h, w), dtype=np.uint8)
         timings["foreground"] = -1
 
-    # ── Stage 4: Morphological cleanup + largest component ────────────────
+    # ── Stage 4: Cleanup + edge-aware refinement ──────────────────────────
     t4 = time.time()
 
-    # Connected components — remove small noise
+    # Remove only tiny noise (< 0.3% of box)
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
         refined, connectivity=8
     )
-    min_area = max(200, int(box_pixels * 0.01))
+    min_area = max(50, int(box_pixels * 0.003))
     clean_mask = np.zeros_like(refined)
 
     if num_labels > 1:
         areas = [stats[i, cv2.CC_STAT_AREA] for i in range(1, num_labels)]
         largest_area = max(areas) if areas else 0
         for i in range(1, num_labels):
-            # Keep component if it's large enough (at least 20% of largest)
-            if stats[i, cv2.CC_STAT_AREA] >= max(min_area, largest_area * 0.2):
+            # Keep component if it's not tiny noise (at least 5% of largest)
+            if stats[i, cv2.CC_STAT_AREA] >= max(min_area, largest_area * 0.05):
                 clean_mask[labels == i] = 255
 
-    # Morphological close to fill small holes
-    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    # Morphological close — fill small gaps between wall regions
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, kernel_close)
 
-    # Fill internal holes (holes inside the wall boundary)
-    contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    hole_filled = np.zeros_like(clean_mask)
-    cv2.drawContours(hole_filled, contours, -1, 255, -1)
-    clean_mask = hole_filled
+    # Edge-aware refinement: use GrabCut to snap mask boundaries to
+    # actual color edges in the image. This makes the mask follow
+    # wall-object and wall-ceiling boundaries precisely.
+    try:
+        clean_mask = _grabcut_refine(image, clean_mask, box_mask)
+    except Exception as gc_err:
+        logger.debug("GrabCut refinement skipped: %s", gc_err)
 
-    # Final exclusion pass
+    # Final: only apply hard exclusion (very confident non-wall)
     clean_mask[exclude_mask > 127] = 0
 
-    # Smooth edges
+    # Smooth edges very slightly
     clean_mask = cv2.GaussianBlur(clean_mask, (3, 3), 0)
     clean_mask = (clean_mask > 127).astype(np.uint8) * 255
 
