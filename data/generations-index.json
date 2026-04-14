@@ -1,5 +1,19 @@
 [
   {
+    "id": "20260414-055637-8a0352",
+    "timestamp": "2026-04-14 05:56:37",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-1",
+    "product_name": "Cambridge 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.16,
+      "total": 0.17
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-055144-c703d9",
     "timestamp": "2026-04-14 05:51:44",
     "client_ip": "127.0.0.1",
