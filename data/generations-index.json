@@ -1,5 +1,47 @@
 [
   {
+    "id": "20260414-045849-d601c0",
+    "timestamp": "2026-04-14 04:58:49",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-hazelnut",
+    "product_name": "Linea Comfort Hazelnut",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.46,
+      "total": 0.48
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-045820-47ab8d",
+    "timestamp": "2026-04-14 04:58:20",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.01,
+      "texture": 0.41,
+      "total": 0.43
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-045623-1ddb14",
+    "timestamp": "2026-04-14 04:56:23",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-8",
+    "product_name": "Cambridge 8",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.01,
+      "texture": 1.36,
+      "total": 1.4
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-045031-4d6872",
     "timestamp": "2026-04-14 04:50:31",
     "client_ip": "127.0.0.1",

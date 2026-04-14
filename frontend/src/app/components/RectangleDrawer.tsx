@@ -86,6 +86,12 @@ export default function RectangleDrawer({
     y: Math.max(0, Math.min(stageSize.height, p.y)),
   }), [stageSize]);
 
+  // Clamp corner handles inward so they remain fully visible & grabbable
+  const clampHandle = useCallback((p: Point) => ({
+    x: Math.max(HANDLE_R + 2, Math.min(stageSize.width - HANDLE_R - 2, p.x)),
+    y: Math.max(HANDLE_R + 2, Math.min(stageSize.height - HANDLE_R - 2, p.y)),
+  }), [stageSize]);
+
   const rectFromPts = useCallback((a: Point, b: Point) => ({
     x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
     w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y),
@@ -131,14 +137,15 @@ export default function RectangleDrawer({
     }
   }, [drawing, drawOrigin, draggingIdx, getStagePos, clamp]);
 
-  const handleMouseUp = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
-    if (e.evt?.cancelable) e.evt.preventDefault();
-    if (drawing && drawOrigin && drawCurrent) {
-      const r = rectFromPts(drawOrigin, drawCurrent);
+  const finalizeDrawing = useCallback((endPos?: Point) => {
+    const end = endPos || drawCurrent;
+    if (drawing && drawOrigin && end) {
+      const cEnd = clamp(end);
+      const r = rectFromPts(drawOrigin, cEnd);
       if (r.w > 5 && r.h > 5) {
         onPointsChange([
-          { x: Math.min(drawOrigin.x, drawCurrent.x), y: Math.min(drawOrigin.y, drawCurrent.y) },
-          { x: Math.max(drawOrigin.x, drawCurrent.x), y: Math.max(drawOrigin.y, drawCurrent.y) },
+          { x: Math.min(drawOrigin.x, cEnd.x), y: Math.min(drawOrigin.y, cEnd.y) },
+          { x: Math.max(drawOrigin.x, cEnd.x), y: Math.max(drawOrigin.y, cEnd.y) },
         ]);
       }
     }
@@ -146,7 +153,21 @@ export default function RectangleDrawer({
     setDrawOrigin(null);
     setDrawCurrent(null);
     setCursorPos(null);
-  }, [drawing, drawOrigin, drawCurrent, rectFromPts, onPointsChange]);
+  }, [drawing, drawOrigin, drawCurrent, clamp, rectFromPts, onPointsChange]);
+
+  const handleMouseUp = useCallback((e: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
+    if (e.evt?.cancelable) e.evt.preventDefault();
+    const pos = getStagePos(e);
+    finalizeDrawing(pos || undefined);
+  }, [getStagePos, finalizeDrawing]);
+
+  // When pointer leaves the canvas, finalize at the clamped boundary
+  const handleMouseLeave = useCallback(() => {
+    setHoverPos(null);
+    if (drawing && drawOrigin) {
+      finalizeDrawing();
+    }
+  }, [drawing, drawOrigin, finalizeDrawing]);
 
   // ── Corner drag (adjust existing rect) ──
   const handleCornerDrag = useCallback((idx: number, nx: number, ny: number) => {
@@ -200,7 +221,7 @@ export default function RectangleDrawer({
         onTouchMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onTouchEnd={handleMouseUp}
-        onMouseLeave={() => setHoverPos(null)}
+        onMouseLeave={handleMouseLeave}
         className="rounded-2xl overflow-hidden border border-stone-200 cursor-crosshair touch-none"
         style={{ background: "#F5F5F0", touchAction: "none", WebkitUserSelect: "none", userSelect: "none", WebkitTouchCallout: "none" } as React.CSSProperties}
       >
@@ -217,33 +238,36 @@ export default function RectangleDrawer({
             />
           )}
 
-          {!drawing && displayCorners.map((pt, i) => (
-            <Circle
-              key={i}
-              x={pt.x} y={pt.y}
-              radius={HANDLE_R}
-              fill={draggingIdx === i ? STEGU_RED_DARK : STEGU_RED}
-              stroke="white" strokeWidth={2.5}
-              shadowColor="rgba(0,0,0,0.3)" shadowBlur={5} shadowOffsetY={2}
-              draggable
-              hitStrokeWidth={IS_TOUCH ? 36 : 24}
-              onDragStart={() => { setDraggingIdx(i); setCursorPos(pt); }}
-              onDragMove={(e) => handleCornerDrag(i, e.target.x(), e.target.y())}
-              onDragEnd={(e) => {
-                handleCornerDrag(i, e.target.x(), e.target.y());
-                setDraggingIdx(null);
-                setCursorPos(null);
-              }}
-              onMouseEnter={(e) => {
-                (e.target as Konva.Circle).radius(HANDLE_R + 3);
-                e.target.getStage()!.container().style.cursor = "grab";
-              }}
-              onMouseLeave={(e) => {
-                (e.target as Konva.Circle).radius(HANDLE_R);
-                e.target.getStage()!.container().style.cursor = "crosshair";
-              }}
-            />
-          ))}
+          {!drawing && displayCorners.map((pt, i) => {
+            const hp = clampHandle(pt);
+            return (
+              <Circle
+                key={i}
+                x={hp.x} y={hp.y}
+                radius={HANDLE_R}
+                fill={draggingIdx === i ? STEGU_RED_DARK : STEGU_RED}
+                stroke="white" strokeWidth={2.5}
+                shadowColor="rgba(0,0,0,0.3)" shadowBlur={5} shadowOffsetY={2}
+                draggable
+                hitStrokeWidth={IS_TOUCH ? 36 : 24}
+                onDragStart={() => { setDraggingIdx(i); setCursorPos(pt); }}
+                onDragMove={(e) => handleCornerDrag(i, e.target.x(), e.target.y())}
+                onDragEnd={(e) => {
+                  handleCornerDrag(i, e.target.x(), e.target.y());
+                  setDraggingIdx(null);
+                  setCursorPos(null);
+                }}
+                onMouseEnter={(e) => {
+                  (e.target as Konva.Circle).radius(HANDLE_R + 3);
+                  e.target.getStage()!.container().style.cursor = "grab";
+                }}
+                onMouseLeave={(e) => {
+                  (e.target as Konva.Circle).radius(HANDLE_R);
+                  e.target.getStage()!.container().style.cursor = "crosshair";
+                }}
+              />
+            );
+          })}
         </Layer>
       </Stage>
 
