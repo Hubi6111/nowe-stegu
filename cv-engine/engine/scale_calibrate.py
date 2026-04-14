@@ -1,20 +1,21 @@
 """Scale Calibration — estimate real-world px/cm ratio from scene references.
 
-DETERMINISTIC APPROACH:
-The most reliable scale reference in any interior photo is the
-ceiling-to-floor distance (standard European: 260-270cm).
+DETERMINISTIC APPROACH — works for both interior AND exterior photos.
 
 Priority order:
-1. Ceiling-to-floor pixel span → divide by 270cm
-2. Door pixel height → divide by 200cm  
-3. Wall selection spans full height (ceiling to floor) → divide by 270cm
-4. Wall selection partial height → estimate from position relative to
-   ceiling/floor edges
+1. Ceiling-to-floor pixel span → divide by 270cm (interior)
+2. Door pixel height → divide by 200cm (interior/exterior)
+3. Wall selection relative to ceiling/floor/furniture (interior)
+4. Window pixel height → divide by 120cm (interior/exterior)
+5. Person pixel height → divide by 175cm (any scene)
+6. Exterior storey detection → divide by 300cm (exterior)
+7. Image height fallback → divide by 270cm
 
 This gives consistent, repeatable results because:
 - Ceiling and floor are LARGE surfaces that SegFormer detects reliably
-- The user's selection box constrains the wall region precisely
-- Standard dimensions (270cm ceiling, 200cm door) vary by at most ±10cm
+- Windows, doors, and persons provide universal scale references
+- For exteriors, storey height (300cm) is a reliable fallback
+- Standard dimensions vary by at most ±10-15cm
 """
 
 import logging
@@ -248,7 +249,108 @@ def calibrate_scale(
                 box_h, wall_above_cm, ppc,
             )
 
-    # ── 4. FALLBACK: image height ≈ room height ────────────────────────
+    # ── 4. WINDOW detection (works for both interior and exterior) ──────
+    window_mask = (segmentation_argmax == ADE20K["window"]).astype(np.uint8)
+    if window_mask.sum() > 200:
+        contours, _ = cv2.findContours(
+            window_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < h * w * 0.003:  # at least 0.3% of image
+                continue
+            _, _, bw, bh = cv2.boundingRect(cnt)
+            aspect = bh / max(bw, 1)
+            # Standard window: taller than wide (aspect > 0.8)
+            # or roughly square (aspect 0.6-1.5)
+            if aspect < 0.4 or aspect > 3.0:
+                continue
+
+            # Standard window height: ~120cm
+            window_height_cm = 120.0
+            ppc = float(bh) / window_height_cm
+            refs.append(ScaleRef(
+                name="window",
+                height_px=bh,
+                real_cm=window_height_cm,
+                px_per_cm=ppc,
+                priority=3,
+            ))
+            logger.info(
+                "REF window: %dpx = %.0fcm → px/cm=%.3f (aspect=%.1f)",
+                bh, window_height_cm, ppc, aspect,
+            )
+
+    # ── 5. PERSON detection (reliable height reference) ─────────────────
+    person_mask = (segmentation_argmax == ADE20K["person"]).astype(np.uint8)
+    if person_mask.sum() > 300:
+        contours, _ = cv2.findContours(
+            person_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area < h * w * 0.005:
+                continue
+            _, _, bw, bh = cv2.boundingRect(cnt)
+            aspect = bh / max(bw, 1)
+            if aspect < 1.5:  # person should be taller than wide
+                continue
+            person_height_cm = 175.0
+            ppc = float(bh) / person_height_cm
+            refs.append(ScaleRef(
+                name="person",
+                height_px=bh,
+                real_cm=person_height_cm,
+                px_per_cm=ppc,
+                priority=3,
+            ))
+            logger.info(
+                "REF person: %dpx = %.0fcm → px/cm=%.3f",
+                bh, person_height_cm, ppc,
+            )
+
+    # ── 6. EXTERIOR FALLBACK: detect if scene is outdoor ────────────────
+    # If no ceiling/floor detected → likely exterior
+    is_exterior = (ceil_bottom is None and floor_top is None)
+
+    if not refs and is_exterior and box:
+        # For exterior: assume typical building storey = 300cm
+        # and the selection covers part of the facade
+        box_h = box[3] - box[1]
+        # A full storey (floor-to-floor) = ~300cm
+        # If selection is roughly full image height, assume one storey
+        selection_ratio = box_h / h
+        if selection_ratio > 0.7:
+            # Selection covers most of the image — likely one storey
+            storey_cm = 300.0
+            ppc = float(box_h) / storey_cm
+            refs.append(ScaleRef(
+                name="exterior_storey",
+                height_px=box_h,
+                real_cm=storey_cm,
+                px_per_cm=ppc,
+                priority=5,
+            ))
+            logger.info(
+                "REF exterior storey: %dpx = %.0fcm → px/cm=%.3f",
+                box_h, storey_cm, ppc,
+            )
+        else:
+            # Partial facade — assume entire image ≈ 300cm storey
+            ppc = float(h) / 300.0
+            refs.append(ScaleRef(
+                name="exterior_image_height",
+                height_px=h,
+                real_cm=300.0,
+                px_per_cm=ppc,
+                priority=6,
+            ))
+            logger.info(
+                "REF exterior image: %dpx ≈ 300cm → px/cm=%.3f",
+                h, ppc,
+            )
+
+    # ── 7. ULTIMATE FALLBACK ────────────────────────────────────────────
     if not refs:
         # Last resort: assume the full image shows ~270cm
         ppc = float(h) / CEILING_HEIGHT_CM

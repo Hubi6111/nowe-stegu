@@ -1,5 +1,61 @@
 [
   {
+    "id": "20260414-053605-39a30b",
+    "timestamp": "2026-04-14 05:36:05",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.17,
+      "total": 0.18
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-053541-650ec5",
+    "timestamp": "2026-04-14 05:35:41",
+    "client_ip": "127.0.0.1",
+    "product_id": "boston-3",
+    "product_name": "Boston 3",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.2,
+      "total": 0.22
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-053343-538bcf",
+    "timestamp": "2026-04-14 05:33:43",
+    "client_ip": "127.0.0.1",
+    "product_id": "monsanto-1",
+    "product_name": "Monsanto 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.38,
+      "total": 0.4
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-053211-df1ac0",
+    "timestamp": "2026-04-14 05:32:11",
+    "client_ip": "127.0.0.1",
+    "product_id": "monsanto-1",
+    "product_name": "Monsanto 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.39,
+      "total": 0.41
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-052408-e44a03",
     "timestamp": "2026-04-14 05:24:08",
     "client_ip": "127.0.0.1",
