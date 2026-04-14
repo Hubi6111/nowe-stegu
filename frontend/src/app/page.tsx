@@ -418,22 +418,14 @@ export default function Home() {
     }, 5000);
 
     try {
-      const textureUrl = `/api/textures/${selectedProduct.productId}`;
-      const texResp = await fetch(textureUrl);
-      const texBlob = await texResp.blob();
-      const texB64 = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.readAsDataURL(texBlob);
-      });
-
-      const resp = await fetch("/api/refine", {
+      // Send directly to Python API (bypass Next.js proxy — body too large)
+      const resp = await fetch(`${API_BASE}/api/refine`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           composite: renderData.refined,
           original: originalImageSrc || imageSrc,
-          texture: texB64,
+          product_id: selectedProduct.productId,
           product_name: selectedProduct.name,
           material_type: selectedProduct.layoutType,
         }),
@@ -444,13 +436,6 @@ export default function Home() {
         try {
           const errData = await resp.json();
           if (errData.detail) errorMsg = errData.detail;
-          else if (errData.error) {
-            // Parse nested JSON if present
-            try {
-              const nested = JSON.parse(errData.error);
-              errorMsg = nested.detail || errorMsg;
-            } catch { errorMsg = errData.error; }
-          }
         } catch { /* use default */ }
         throw new Error(errorMsg);
       }
