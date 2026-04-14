@@ -128,7 +128,7 @@ def calibrate_scale(
                 bh, DOOR_HEIGHT_CM, ppc, aspect,
             )
 
-    # ── 3. WALL SELECTION relative to ceiling/floor ─────────────────────
+    # ── 3. WALL SELECTION relative to ceiling/floor/furniture ─────────────
     if box and wall_mask is not None:
         box_y1, box_y2 = box[1], box[3]
         box_h = box_y2 - box_y1
@@ -137,22 +137,76 @@ def calibrate_scale(
         touches_ceiling = ceil_bottom is not None and abs(box_y1 - ceil_bottom) < h * 0.08
         touches_floor = floor_top is not None and abs(box_y2 - floor_top) < h * 0.08
 
+        # Detect countertop/cabinet/table as "elevated floor"
+        # ADE20K: cabinet=10, table=15, counter=45, shelf=24, desk=33
+        furniture_classes = [10, 15, 45, 24, 33]
+        furniture_top = None
+        furniture_real_height_cm = None
+
+        for cls_id in furniture_classes:
+            cls_mask = (segmentation_argmax == cls_id).astype(np.uint8)
+            if cls_mask.sum() < 200:
+                continue
+            cls_rows = np.where(cls_mask.any(axis=1))[0]
+            if len(cls_rows) == 0:
+                continue
+            top_row = int(cls_rows.min())
+            # Is this furniture's top edge near the selection bottom?
+            if abs(top_row - box_y2) < h * 0.10:
+                furniture_top = top_row
+                # Standard heights: counter=90cm, table=75cm, desk=75cm, shelf=varies
+                if cls_id == 45:  # counter
+                    furniture_real_height_cm = 90.0
+                elif cls_id == 10:  # cabinet (kitchen upper vs lower)
+                    # If cabinet top is in upper half of image, it's an upper cabinet
+                    if top_row < h * 0.5:
+                        furniture_real_height_cm = 140.0  # upper cabinet bottom
+                    else:
+                        furniture_real_height_cm = 90.0  # counter-height cabinet
+                elif cls_id in (15, 33):  # table/desk
+                    furniture_real_height_cm = 75.0
+                else:
+                    furniture_real_height_cm = 80.0  # generic shelf
+                logger.info(
+                    "FURNITURE detected (class=%d) top at row %d, near box bottom %d → ~%.0fcm",
+                    cls_id, top_row, box_y2, furniture_real_height_cm,
+                )
+                break
+
+        # Selection touches both ceiling and floor
         if touches_ceiling and touches_floor:
-            # Selection = full wall height = ceiling height
             ppc = float(box_h) / CEILING_HEIGHT_CM
             refs.append(ScaleRef(
                 name="wall_full_height",
                 height_px=box_h,
                 real_cm=CEILING_HEIGHT_CM,
                 px_per_cm=ppc,
-                priority=1,  # Same reliability as ceiling-to-floor
+                priority=1,
             ))
             logger.info(
                 "REF wall full height: %dpx = %.0fcm → px/cm=%.3f",
                 box_h, CEILING_HEIGHT_CM, ppc,
             )
+
+        # Selection touches ceiling, bottom sits on furniture (countertop/table)
+        elif touches_ceiling and furniture_top is not None and furniture_real_height_cm is not None:
+            # Wall above furniture = ceiling_height - furniture_height
+            wall_above_furniture_cm = CEILING_HEIGHT_CM - furniture_real_height_cm
+            ppc = float(box_h) / wall_above_furniture_cm
+            refs.append(ScaleRef(
+                name="wall_above_furniture",
+                height_px=box_h,
+                real_cm=wall_above_furniture_cm,
+                px_per_cm=ppc,
+                priority=2,
+            ))
+            logger.info(
+                "REF wall above furniture: %dpx = %.0fcm (270-%.0f) → px/cm=%.3f",
+                box_h, wall_above_furniture_cm, furniture_real_height_cm, ppc,
+            )
+
+        # Selection touches floor, doesn't reach ceiling
         elif touches_floor and ceil_bottom is not None:
-            # Selection starts below ceiling — compute from known ceiling pos
             full_wall_px = floor_top - ceil_bottom if floor_top else box_y2 - ceil_bottom
             if full_wall_px > 50:
                 ppc = float(full_wall_px) / CEILING_HEIGHT_CM
@@ -163,8 +217,9 @@ def calibrate_scale(
                     px_per_cm=ppc,
                     priority=2,
                 ))
+
+        # Selection touches ceiling, doesn't reach floor
         elif touches_ceiling and floor_top is not None:
-            # Selection ends above floor
             full_wall_px = floor_top - ceil_bottom if ceil_bottom else floor_top - box_y1
             if full_wall_px > 50:
                 ppc = float(full_wall_px) / CEILING_HEIGHT_CM
@@ -175,6 +230,23 @@ def calibrate_scale(
                     px_per_cm=ppc,
                     priority=2,
                 ))
+
+        # Selection doesn't touch floor — bottom sits on furniture, no ceiling detected
+        elif furniture_top is not None and furniture_real_height_cm is not None and ceil_bottom is None:
+            # Estimate: selection = wall from furniture to ceiling
+            wall_above_cm = CEILING_HEIGHT_CM - furniture_real_height_cm
+            ppc = float(box_h) / wall_above_cm
+            refs.append(ScaleRef(
+                name="wall_above_furniture_no_ceil",
+                height_px=box_h,
+                real_cm=wall_above_cm,
+                px_per_cm=ppc,
+                priority=3,
+            ))
+            logger.info(
+                "REF wall above furniture (no ceiling): %dpx ≈ %.0fcm → px/cm=%.3f",
+                box_h, wall_above_cm, ppc,
+            )
 
     # ── 4. FALLBACK: image height ≈ room height ────────────────────────
     if not refs:
