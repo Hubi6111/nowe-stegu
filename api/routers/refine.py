@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["refine"])
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-MODEL_ID = "gemini-3.1-flash"
+MODEL_ID = "gemini-3.1-flash-image-preview"
 
 MAX_DIM = 1024
 JPEG_QUALITY = 85
