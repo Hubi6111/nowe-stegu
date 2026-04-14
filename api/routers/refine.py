@@ -249,17 +249,25 @@ async def refine_render(req: RefineRequest, request: Request):
                         mime = part["inlineData"]["mimeType"]
                         img_b64 = part["inlineData"]["data"]
 
-                        # Apply watermark
+                        # Resize to match original composite dimensions
                         try:
                             raw = base64.b64decode(img_b64)
                             result_img = Image.open(io.BytesIO(raw)).convert("RGB")
+                            # Force back to original size
+                            orig_w, orig_h = composite_img.size
+                            if result_img.size != (orig_w, orig_h):
+                                logger.info(
+                                    "Resizing result %dx%d → %dx%d (match original)",
+                                    result_img.width, result_img.height, orig_w, orig_h,
+                                )
+                                result_img = result_img.resize((orig_w, orig_h), Image.LANCZOS)
                             watermarked = _apply_watermark(result_img)
                             buf = io.BytesIO()
                             watermarked.save(buf, format="JPEG", quality=92)
                             img_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
                             mime = "image/jpeg"
                         except Exception as wm_exc:
-                            logger.warning("Watermark failed (non-fatal): %s", wm_exc)
+                            logger.warning("Post-processing failed (non-fatal): %s", wm_exc)
 
                         # Count usage
                         client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
