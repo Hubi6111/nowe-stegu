@@ -15,5 +15,8 @@
   "bumpDepthMm": 2,
   "specularIntensity": 0.15,
   "surfaceDescription": "Smooth wood-grain lamel panel with subtle satin sheen along vertical grain direction, soft diffuse reflections visible under oblique light, thin 2mm gaps between adjacent panels showing dark substrate, natural hazelnut wood color with visible grain pattern",
-  "shopUrl": "https://stegu.pl/produkty/lamele/"
+  "shopUrl": "https://stegu.pl/produkty/lamele/",
+  "tileRealHeightMm": 480,
+  "tileRealWidthMm": 270,
+  "albedoLamelCount": 5
 }

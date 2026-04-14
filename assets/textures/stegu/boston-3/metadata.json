@@ -15,5 +15,6 @@
   "bumpDepthMm": 12,
   "specularIntensity": 0.05,
   "surfaceDescription": "Rough natural stone with deep irregular relief, matte surface absorbing most light, visible chisel marks and natural color variation between stones, recessed mortar joints 8-10mm deep",
-  "shopUrl": "https://stegu.pl/produkty/kamien-dekoracyjny/"
+  "shopUrl": "https://stegu.pl/produkty/kamien-dekoracyjny/",
+  "tileRealHeightMm": 440
 }

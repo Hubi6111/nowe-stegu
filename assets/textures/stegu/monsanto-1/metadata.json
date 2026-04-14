@@ -15,5 +15,6 @@
   "bumpDepthMm": 10,
   "specularIntensity": 0.06,
   "surfaceDescription": "Natural stone with rough irregular surface geometry, deep relief with mixed stone sizes, completely matte and light-absorbing, visible mortar between stones 8-10mm deep with natural tonal variation",
-  "shopUrl": "https://stegu.pl/produkty/kamien-dekoracyjny/"
+  "shopUrl": "https://stegu.pl/produkty/kamien-dekoracyjny/",
+  "tileRealHeightMm": 440
 }
