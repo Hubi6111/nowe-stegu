@@ -378,11 +378,11 @@ async def wall_mask_endpoint(req: WallMaskRequest):
         coarse_mask,
         box=(x1, y1, x2, y2),
         exclude_mask=exclude_mask,
-        n_iterations=2,
+        n_iterations=3,
     )
     _warmup_status["sam2"] = True
     timings["sam2_refine"] = round(time.time() - t2, 2)
-    logger.info("Stage 2 (SAM2 refine 2-iter): %.2fs", timings["sam2_refine"])
+    logger.info("Stage 2 (SAM2 refine 3-iter): %.2fs", timings["sam2_refine"])
 
     # Clip to box — but do NOT re-apply exclude_mask here.
     # SAM2 has better spatial understanding than SegFormer's exclusion.

@@ -78,21 +78,45 @@ def predict_full(image: Image.Image) -> dict:
     """
     load_model()
 
-    inputs = _processor(images=image, return_tensors="pt")
-    inputs = {k: v.to(_device) for k, v in inputs.items()}
+    target_h, target_w = image.height, image.width
 
-    with torch.no_grad():
-        outputs = _model(**inputs)
+    # Multi-scale inference: process at 2 scales and average logits.
+    # This dramatically improves accuracy for shadows, small objects,
+    # and boundary regions where single-scale often fails.
+    scales = [1.0, 1.5]
+    accumulated_logits = None
 
-    logits = outputs.logits  # (1, 150, H/4, W/4)
-    upsampled = torch.nn.functional.interpolate(
-        logits,
-        size=(image.height, image.width),
-        mode="bilinear",
-        align_corners=False,
-    )
+    for scale in scales:
+        if scale == 1.0:
+            img_input = image
+        else:
+            new_w = int(image.width * scale)
+            new_h = int(image.height * scale)
+            img_input = image.resize((new_w, new_h), Image.LANCZOS)
 
-    probs = torch.nn.functional.softmax(upsampled, dim=1)
+        inputs = _processor(images=img_input, return_tensors="pt")
+        inputs = {k: v.to(_device) for k, v in inputs.items()}
+
+        with torch.no_grad():
+            outputs = _model(**inputs)
+
+        logits = outputs.logits  # (1, 150, H/4, W/4)
+        upsampled = torch.nn.functional.interpolate(
+            logits,
+            size=(target_h, target_w),
+            mode="bilinear",
+            align_corners=False,
+        )
+
+        if accumulated_logits is None:
+            accumulated_logits = upsampled
+        else:
+            accumulated_logits = accumulated_logits + upsampled
+
+    # Average the multi-scale logits
+    accumulated_logits = accumulated_logits / len(scales)
+
+    probs = torch.nn.functional.softmax(accumulated_logits, dim=1)
     probs_np = probs[0].cpu().numpy()  # (150, H, W)
     argmax = probs_np.argmax(axis=0).astype(np.int32)  # (H, W)
 

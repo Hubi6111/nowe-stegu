@@ -99,10 +99,10 @@ def refine_mask(
             xs_idx.min(), ys_idx.min(), xs_idx.max(), ys_idx.max()
         ], dtype=np.float32)
 
-    # Generate strategic point prompts
-    positive_points = _grid_sample_positive(coarse_mask, n_points=12)
+    # Generate strategic point prompts — dense coverage for precision
+    positive_points = _grid_sample_positive(coarse_mask, n_points=16)
     negative_points = _strategic_negatives(
-        coarse_mask, sam_box, exclude_mask, n_points=8
+        coarse_mask, sam_box, exclude_mask, n_points=10
     )
 
     point_coords = np.concatenate([positive_points, negative_points], axis=0)
@@ -132,15 +132,15 @@ def refine_mask(
         boundary_pos, boundary_neg = _boundary_points(
             (current_mask * 255).astype(np.uint8),
             exclude_mask,
-            n_each=4,
+            n_each=6,
         )
         iter_coords = np.concatenate([
-            positive_points[:4],  # Keep some core interior points
+            positive_points[:6],  # Keep some core interior points
             boundary_pos,
             boundary_neg,
         ], axis=0)
         iter_labels = np.array(
-            [1] * (4 + len(boundary_pos)) + [0] * len(boundary_neg)
+            [1] * (6 + len(boundary_pos)) + [0] * len(boundary_neg)
         )
 
         masks2, scores2, logits2 = _predictor.predict(
