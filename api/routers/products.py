@@ -38,7 +38,7 @@ class ProductOut(BaseModel):
 LAYOUT_TO_CATEGORY = {
     "running-bond": "cegły",
     "random-stone": "kamień",
-    "vertical-stack": "panele",
+    "vertical-stack": "lamele",
     "stack-bond": "cegły",
     "flemish-bond": "cegły",
     "herringbone": "cegły",

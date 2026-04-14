@@ -42,7 +42,7 @@ interface RenderData {
   scale?: ScaleInfo;
   analysis?: Record<string, unknown>;
 }
-type ResultTab = "final" | "composite" | "compare";
+type ResultTab = "before" | "after" | "compare";
 
 /* ── Pipeline stage tracking ── */
 
@@ -58,9 +58,9 @@ interface PipelineStage {
 }
 
 const INITIAL_STAGES: PipelineStage[] = [
-  { id: "mask", label: "Analiza ściany", status: "pending" },
-  { id: "decode", label: "Przetwarzanie obrazu", status: "pending" },
-  { id: "texture", label: "Nakładanie tekstury", status: "pending" },
+  { id: "mask", label: "Analizowanie sceny", status: "pending" },
+  { id: "decode", label: "Przygotowywanie materiałów", status: "pending" },
+  { id: "texture", label: "Tworzenie wizualizacji", status: "pending" },
 ];
 
 
@@ -177,14 +177,14 @@ function IconCart() { return <svg width="16" height="16" viewBox="0 0 24 24" fil
 /* ── Loading overlay ── */
 
 const LOADING_MESSAGES = [
-  "Badanie sceny…",
-  "Wykrywanie ściany…",
-  "Analiza geometrii…",
-  "Kalibracja wymiarów…",
-  "Ładowanie tekstur…",
+  "Analizowanie sceny…",
+  "Rozpoznawanie ściany…",
   "Dopasowywanie perspektywy…",
+  "Przygotowywanie tekstury…",
+  "Tworzenie wizualizacji…",
   "Nakładanie materiału…",
-  "Renderowanie…",
+  "Wygładzanie krawędzi…",
+  "Finalizowanie…",
 ];
 
 function AnimatedStatusText({ currentMessage }: { currentMessage?: string }) {
@@ -381,7 +381,7 @@ export default function Home() {
   const [renderData, setRenderData] = useState<RenderData | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [genProgress, setGenProgress] = useState("");
-  const [resultTab, setResultTab] = useState<ResultTab>("final");
+  const [resultTab, setResultTab] = useState<ResultTab>("compare");
   const [mobileProductOpen, setMobileProductOpen] = useState(false);
   const [remaining, setRemaining] = useState<{ remaining: number; limit: number; unlimited: boolean } | null>(null);
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
@@ -515,12 +515,8 @@ export default function Home() {
           confirmedMask = maskData.final_mask || maskData.wall_mask;
           calibrationData = maskData.calibration || null;
           const timing = maskData.timings?.total;
-          const model = maskData.wall_model || "cv-engine";
-          const calInfo = calibrationData
-            ? ` | ${(calibrationData as { px_per_cm?: number }).px_per_cm?.toFixed(2)} px/cm (${(calibrationData as { confidence?: string }).confidence})`
-            : "";
           setPipelineStages(prev => prev.map(s => s.id === "mask"
-            ? { ...s, status: "done", timing, detail: model + calInfo }
+            ? { ...s, status: "done", timing }
             : s
           ));
         } else {
@@ -593,11 +589,11 @@ export default function Home() {
               setRenderData({
                 composite: (result.composite as string) || null,
                 refined: (result.refined as string) || (result.composite as string) || null,
-                renderEngine: (result.gemini_model as string) || "deterministic",
-                timings: (result.timings as Record<string, number>) || {},
+                renderEngine: "deterministic",
+                timings: {},
                 analysis: (result.analysis as Record<string, unknown>) || finalAnalysis,
               });
-              setResultTab("final");
+              setResultTab("compare");
               setStage("generated");
               fetchRemaining();
             } else if (evt.ok === false) {
@@ -684,7 +680,7 @@ export default function Home() {
             <path d="M8 13h3M14 10h2" />
           </svg>
         );
-      case "panele":
+      case "lamele":
         return (
           <svg className={cls} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="3" width="4" height="18" rx="1" /><rect x="10" y="3" width="4" height="18" rx="1" /><rect x="17" y="3" width="4" height="18" rx="1" />
@@ -724,7 +720,7 @@ export default function Home() {
     }
   }, [products.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const CATEGORY_ORDER = ["cegły", "kamień", "panele", "inne"];
+  const CATEGORY_ORDER = ["cegły", "kamień", "lamele", "inne"];
 
   const ProductGrid = ({ onPick }: { onPick?: () => void }) => (
     <>
@@ -968,7 +964,7 @@ export default function Home() {
                     <div className="flex flex-col gap-3 sm:gap-4 animate-scale-in">
                       {/* Result tabs */}
                       <div className="border-b border-stone-200 flex">
-                        {([["final", "Wizualizacja"], ["composite", "Surowy"], ["compare", "Porównanie"]] as [ResultTab, string][]).map(([tab, label]) => (
+                        {([["compare", "Porównanie"], ["after", "Po"], ["before", "Przed"]] as [ResultTab, string][]).map(([tab, label]) => (
                           <button
                             key={tab}
                             type="button"
@@ -984,11 +980,11 @@ export default function Home() {
 
                       {/* Result content */}
                       {resultTab === "compare" && (originalImageSrc || imageSrc) && renderData.refined ? (
-                        <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} />
-                      ) : resultTab === "final" && renderData.refined ? (
-                        <img src={renderData.refined} alt="Wizualizacja" className="rounded-xl w-full" />
-                      ) : resultTab === "composite" && renderData.composite ? (
-                        <img src={renderData.composite} alt="Kompozyt" className="rounded-xl w-full" />
+                        <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} initialPosition={95} />
+                      ) : resultTab === "after" && renderData.refined ? (
+                        <img src={renderData.refined} alt="Po wizualizacji" className="rounded-xl w-full" />
+                      ) : resultTab === "before" && (originalImageSrc || imageSrc) ? (
+                        <img src={originalImageSrc || imageSrc!} alt="Przed wizualizacją" className="rounded-xl w-full" />
                       ) : (
                         <div className="p-8 rounded-xl bg-stone-50 text-center">
                           <p className="text-sm text-stone-400">Brak danych</p>

@@ -5,14 +5,16 @@ import { useRef, useState, useCallback } from "react";
 interface BeforeAfterSliderProps {
   before: string;
   after: string;
+  initialPosition?: number;
 }
 
 export default function BeforeAfterSlider({
   before,
   after,
+  initialPosition = 50,
 }: BeforeAfterSliderProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState(50);
+  const [pos, setPos] = useState(initialPosition);
   const dragging = useRef(false);
 
   const updatePos = useCallback((clientX: number) => {
