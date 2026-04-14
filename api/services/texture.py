@@ -181,6 +181,45 @@ def exclusions_to_mask(
     return (np.array(img) > 0).astype(np.uint8)
 
 
+def straighten_mask_edges(mask: np.ndarray, epsilon_factor: float = 0.005) -> np.ndarray:
+    """Straighten jagged mask edges into clean straight lines.
+
+    Uses contour approximation (Ramer-Douglas-Peucker) to simplify
+    irregular segmentation boundaries into a polygon with clean,
+    straight edges. This removes the 'staircase' effect from AI masks.
+
+    Args:
+        mask: Binary uint8 mask (0/1).
+        epsilon_factor: Controls straightening aggressiveness.
+            Higher = more simplified (0.005 = moderate, 0.01 = aggressive).
+    """
+    try:
+        import cv2
+    except ImportError:
+        logger.warning("cv2 not available — skipping edge straightening")
+        return mask
+
+    mask_255 = (mask * 255).astype(np.uint8)
+    contours, _ = cv2.findContours(mask_255, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if not contours:
+        return mask
+
+    # Create clean mask from simplified contours
+    clean = np.zeros_like(mask_255)
+    for cnt in contours:
+        # Skip tiny contours (noise)
+        if cv2.contourArea(cnt) < 100:
+            continue
+        # Approximate contour with straight lines
+        perimeter = cv2.arcLength(cnt, True)
+        epsilon = epsilon_factor * perimeter
+        approx = cv2.approxPolyDP(cnt, epsilon, True)
+        cv2.drawContours(clean, [approx], -1, 255, cv2.FILLED)
+
+    return (clean > 0).astype(np.uint8)
+
+
 def compute_final_mask(
     wall_mask: np.ndarray,
     occluder_mask: np.ndarray | None,
@@ -191,6 +230,8 @@ def compute_final_mask(
         final = final & (~occluder_mask.astype(bool)).astype(np.uint8)
     if exclusion_mask is not None:
         final = final & (~exclusion_mask.astype(bool)).astype(np.uint8)
+    # Straighten jagged edges from segmentation
+    final = straighten_mask_edges(final)
     return final
 
 
