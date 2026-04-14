@@ -1,5 +1,33 @@
 [
   {
+    "id": "20260414-163540-409634",
+    "timestamp": "2026-04-14 16:35:40",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.49,
+      "total": 0.51
+    },
+    "has_image": true
+  },
+  {
+    "id": "20260414-162433-f97b34",
+    "timestamp": "2026-04-14 16:24:33",
+    "client_ip": "127.0.0.1",
+    "product_id": "cambridge-1",
+    "product_name": "Cambridge 1",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.2,
+      "total": 0.21
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-161812-2ebad7",
     "timestamp": "2026-04-14 16:18:12",
     "client_ip": "127.0.0.1",

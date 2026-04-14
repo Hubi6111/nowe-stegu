@@ -678,13 +678,13 @@ def _luminance_overlay(
         micro_detail = 0.92 + 0.08 * (micro_detail / mm)
 
     lum_factor = lum_global * local * micro_detail
-    lum_factor = np.clip(lum_factor, 0.20, 2.3)
+    lum_factor = np.clip(lum_factor, 0.45, 1.8)
 
     return np.clip(tiled * lum_factor[:, :, np.newaxis], 0, 1)
 
 
 def _noise_match(
-    blended: np.ndarray, room_arr: np.ndarray, strength: float = 0.35
+    blended: np.ndarray, room_arr: np.ndarray, strength: float = 0.15
 ) -> np.ndarray:
     """Transfer grain/noise from the original photo onto the result."""
     H, W = room_arr.shape[:2]
@@ -721,7 +721,7 @@ def project_texture(
     mask: np.ndarray,
     texture: Image.Image,
     meta: dict | None = None,
-    alpha: float = 0.995,
+    alpha: float = 1.0,
     feather_radius: int = 2,
     polygon: list[dict] | None = None,
     analysis: dict | None = None,
