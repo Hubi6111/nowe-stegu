@@ -190,11 +190,11 @@ async def wall_mask_endpoint(req: WallMaskRequest):
     """Smart wall masking: selection box → wall-only mask.
 
     Pipeline:
-    1. SegFormer wall prior → probability map of wall pixels
-    2. Clip to user selection box
-    3. SAM2 refine → pixel-precise wall boundary
+    1. SegFormer-B5 → wall prob + floor/ceiling/door exclusion
+    2. Intersect wall prior with user box, subtract exclusions
+    3. SAM2 iterative refinement with grid points + exclusion negatives
     4. GroundingDINO + SAM2 → detect & subtract foreground objects
-    5. Morphological cleanup → remove ceiling, floor, stray pixels
+    5. Morphological cleanup + largest-component selection
     """
     t0 = time.time()
     timings = {}
@@ -212,41 +212,71 @@ async def wall_mask_endpoint(req: WallMaskRequest):
 
     logger.info("Wall mask request: box=[%d,%d,%d,%d] image=%dx%d", x1, y1, x2, y2, w, h)
 
-    # ── Stage 1: Wall prior (SegFormer) ───────────────────────────────────
+    # ── Stage 1: Full semantic segmentation (SegFormer-B5) ────────────────
     t1 = time.time()
-    wall_prob = wall_prior.predict_wall_mask(image)
+    seg_result = wall_prior.predict_full(image)
+    wall_prob = seg_result["wall_prob"]
+    exclude_mask = seg_result["exclude_mask"]
+    floor_prob = seg_result["floor_prob"]
+    ceiling_prob = seg_result["ceiling_prob"]
     _warmup_status["wall_prior"] = True
     timings["wall_prior"] = round(time.time() - t1, 2)
-    logger.info("Stage 1 (wall prior): %.2fs", timings["wall_prior"])
+    logger.info("Stage 1 (wall prior B5): %.2fs", timings["wall_prior"])
 
-    # Clip wall probability to selection box
+    # Box mask
     box_mask = np.zeros((h, w), dtype=np.uint8)
     box_mask[y1:y2, x1:x2] = 255
-
-    # Wall within box — use lower threshold to capture more wall
-    wall_in_box = (wall_prob > 0.15).astype(np.uint8) * 255
-    wall_in_box = np.minimum(wall_in_box, box_mask)
-
-    # If wall prior found very little inside the box, fall back to full box
-    wall_pixels = wall_in_box.sum() / 255
     box_pixels = (y2 - y1) * (x2 - x1)
-    if wall_pixels < box_pixels * 0.1:
-        logger.warning("Wall prior found <10%% wall in box, using full box as initial mask")
-        wall_in_box = box_mask.copy()
 
-    # ── Stage 2: SAM2 refinement ──────────────────────────────────────────
+    # ── Build coarse wall mask ────────────────────────────────────────────
+    wall_in_box = wall_prob.copy()
+    wall_in_box[box_mask == 0] = 0
+
+    # Remove exclusion zones from wall probability
+    wall_in_box[exclude_mask > 127] = 0
+
+    # Suppress floor/ceiling with soft threshold
+    wall_in_box[floor_prob > 0.10] *= 0.1
+    wall_in_box[ceiling_prob > 0.10] *= 0.1
+
+    # Adaptive threshold based on peak probability in box
+    max_prob = wall_in_box.max()
+    if max_prob > 0.5:
+        threshold = max(0.15, max_prob * 0.3)
+    else:
+        threshold = 0.10
+
+    coarse_mask = (wall_in_box > threshold).astype(np.uint8) * 255
+
+    # If wall prior found very little, fall back to box minus exclusions
+    wall_pixel_count = coarse_mask.sum() / 255
+    if wall_pixel_count < box_pixels * 0.08:
+        logger.warning("Wall prior found <8%% wall in box, using box - exclusions")
+        coarse_mask = box_mask.copy()
+        coarse_mask[exclude_mask > 127] = 0
+
+    logger.info(
+        "Coarse mask: threshold=%.3f, pixels=%d (%.1f%% of box)",
+        threshold, coarse_mask.sum() // 255,
+        (coarse_mask.sum() / 255) / max(box_pixels, 1) * 100,
+    )
+
+    # ── Stage 2: SAM2 iterative refinement ────────────────────────────────
     t2 = time.time()
     refined = mask_refine.refine_mask(
         image,
-        wall_in_box,
-        polygon=None,
+        coarse_mask,
+        box=(x1, y1, x2, y2),
+        exclude_mask=exclude_mask,
+        n_iterations=2,
     )
     _warmup_status["sam2"] = True
     timings["sam2_refine"] = round(time.time() - t2, 2)
-    logger.info("Stage 2 (SAM2 refine): %.2fs", timings["sam2_refine"])
+    logger.info("Stage 2 (SAM2 refine 2-iter): %.2fs", timings["sam2_refine"])
 
-    # Clip refined result back to box (SAM might leak outside)
+    # Clip to box and re-apply exclusion zones
     refined = np.minimum(refined, box_mask)
+    refined[exclude_mask > 127] = 0
 
     # ── Stage 3: Foreground occlusion ─────────────────────────────────────
     t3 = time.time()
@@ -261,11 +291,9 @@ async def wall_mask_endpoint(req: WallMaskRequest):
         logger.info("Stage 3 (foreground): %.2fs, %d fg pixels",
                      timings["foreground"], fg_mask.sum() // 255)
 
-        # Subtract foreground from wall mask
         if fg_mask.sum() > 0:
-            # Dilate foreground slightly for safety
-            kernel = np.ones((5, 5), np.uint8)
-            fg_dilated = cv2.dilate(fg_mask, kernel, iterations=1)
+            kernel = np.ones((7, 7), np.uint8)
+            fg_dilated = cv2.dilate(fg_mask, kernel, iterations=2)
             refined = np.clip(
                 refined.astype(np.int16) - fg_dilated.astype(np.int16),
                 0, 255,
@@ -275,32 +303,47 @@ async def wall_mask_endpoint(req: WallMaskRequest):
         fg_mask = np.zeros((h, w), dtype=np.uint8)
         timings["foreground"] = -1
 
-    # ── Stage 4: Morphological cleanup ────────────────────────────────────
+    # ── Stage 4: Morphological cleanup + largest component ────────────────
     t4 = time.time()
 
-    # Remove small connected components (noise)
+    # Connected components — remove small noise
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
         refined, connectivity=8
     )
-    min_area = max(100, int(box_pixels * 0.005))  # at least 0.5% of box
+    min_area = max(200, int(box_pixels * 0.01))
     clean_mask = np.zeros_like(refined)
-    for i in range(1, num_labels):
-        if stats[i, cv2.CC_STAT_AREA] >= min_area:
-            clean_mask[labels == i] = 255
+
+    if num_labels > 1:
+        areas = [stats[i, cv2.CC_STAT_AREA] for i in range(1, num_labels)]
+        largest_area = max(areas) if areas else 0
+        for i in range(1, num_labels):
+            # Keep component if it's large enough (at least 20% of largest)
+            if stats[i, cv2.CC_STAT_AREA] >= max(min_area, largest_area * 0.2):
+                clean_mask[labels == i] = 255
 
     # Morphological close to fill small holes
-    kernel_close = np.ones((7, 7), np.uint8)
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
     clean_mask = cv2.morphologyEx(clean_mask, cv2.MORPH_CLOSE, kernel_close)
 
-    # Smooth edges slightly
-    clean_mask = cv2.GaussianBlur(clean_mask, (5, 5), 0)
+    # Fill internal holes (holes inside the wall boundary)
+    contours, _ = cv2.findContours(clean_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    hole_filled = np.zeros_like(clean_mask)
+    cv2.drawContours(hole_filled, contours, -1, 255, -1)
+    clean_mask = hole_filled
+
+    # Final exclusion pass
+    clean_mask[exclude_mask > 127] = 0
+
+    # Smooth edges
+    clean_mask = cv2.GaussianBlur(clean_mask, (3, 3), 0)
     clean_mask = (clean_mask > 127).astype(np.uint8) * 255
 
     timings["cleanup"] = round(time.time() - t4, 2)
     timings["total"] = round(time.time() - t0, 2)
 
-    logger.info("Wall mask complete: total=%.2fs, mask pixels=%d",
-                timings["total"], clean_mask.sum() // 255)
+    logger.info("Wall mask complete: total=%.2fs, mask pixels=%d (%.1f%% of box)",
+                timings["total"], clean_mask.sum() // 255,
+                (clean_mask.sum() / 255) / max(box_pixels, 1) * 100)
 
     # ── Build overlay visualization ───────────────────────────────────────
     overlay = render_mask_overlay(image, clean_mask)
@@ -309,6 +352,7 @@ async def wall_mask_endpoint(req: WallMaskRequest):
         "wall_mask": mask_to_b64(clean_mask),
         "wall_prior_raw": mask_to_b64((wall_prob * 255).astype(np.uint8)),
         "foreground_mask": mask_to_b64(fg_mask),
+        "exclude_mask": mask_to_b64(exclude_mask),
         "overlay": image_to_b64(overlay),
         "timings": timings,
         "stats": {
@@ -318,6 +362,7 @@ async def wall_mask_endpoint(req: WallMaskRequest):
             "box": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
         },
     }
+
 
 
 # ── Other endpoints ───────────────────────────────────────────────────────────

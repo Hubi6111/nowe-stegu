@@ -1,12 +1,11 @@
 """Stage 1: Wall Prior — semantic segmentation to detect wall regions.
 
-Uses mmsegmentation with SegFormer (or falls back to HuggingFace SegFormer)
-to produce a probability mask of wall pixels from the ADE20K wall class.
+Uses SegFormer-B5 (largest) fine-tuned on ADE20K via HuggingFace.
+Returns wall probability + explicit floor/ceiling exclusion maps.
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import cv2
 import numpy as np
@@ -15,9 +14,24 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-# ADE20K class index for "wall" = 0 (background), actual wall = class 1
-# Full list: https://docs.google.com/spreadsheets/d/1se8YEtb2detS7OuPE86fXGyD269pMycAWe2mtKUj2W8
-ADE20K_WALL_CLASS = 0  # "wall" in ADE20K  (class index 0 = wall)
+# ADE20K 150-class index (0-indexed)
+ADE20K_WALL = 0        # wall
+ADE20K_FLOOR = 3       # floor, flooring
+ADE20K_CEILING = 5     # ceiling
+ADE20K_DOOR = 14       # door
+ADE20K_WINDOW = 8      # windowpane, window
+ADE20K_COLUMN = 41     # column, pillar
+ADE20K_STAIRS = 53     # stairs, steps
+
+# Classes that should NEVER be part of a wall mask
+EXCLUDE_CLASSES = [
+    ADE20K_FLOOR,
+    ADE20K_CEILING,
+    ADE20K_STAIRS,
+    # Door and window are wall-adjacent — include them in exclusion
+    ADE20K_DOOR,
+    ADE20K_WINDOW,
+]
 
 _model = None
 _processor = None
@@ -31,7 +45,7 @@ def _get_device() -> torch.device:
 
 
 def load_model():
-    """Load SegFormer-B3 fine-tuned on ADE20K via HuggingFace transformers."""
+    """Load SegFormer-B5 (largest variant) fine-tuned on ADE20K."""
     global _model, _processor, _device
     if _model is not None:
         return
@@ -39,7 +53,8 @@ def load_model():
     from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
     _device = _get_device()
-    model_name = "nvidia/segformer-b3-finetuned-ade-512-512"
+    # Use B5 — largest and most accurate variant
+    model_name = "nvidia/segformer-b5-finetuned-ade-640-640"
     logger.info("Loading wall prior model: %s on %s", model_name, _device)
 
     _processor = SegformerImageProcessor.from_pretrained(model_name)
@@ -47,17 +62,19 @@ def load_model():
     _model.to(_device)
     _model.eval()
 
-    logger.info("Wall prior model loaded (SegFormer-B3 ADE20K)")
+    logger.info("Wall prior model loaded (SegFormer-B5 ADE20K)")
 
 
-def predict_wall_mask(image: Image.Image) -> np.ndarray:
-    """Predict wall probability mask from a room photo.
-
-    Args:
-        image: RGB PIL image
+def predict_full(image: Image.Image) -> dict:
+    """Run full semantic segmentation, returning wall prob + exclusion maps.
 
     Returns:
-        Wall probability mask as float32 numpy array [0..1], same size as input
+        dict with keys:
+        - "wall_prob": float32 [0..1] wall probability
+        - "floor_prob": float32 [0..1] floor probability
+        - "ceiling_prob": float32 [0..1] ceiling probability
+        - "exclude_mask": uint8 [0/255] combined exclusion mask
+        - "argmax": int32 per-pixel class labels
     """
     load_model()
 
@@ -67,9 +84,7 @@ def predict_wall_mask(image: Image.Image) -> np.ndarray:
     with torch.no_grad():
         outputs = _model(**inputs)
 
-    # outputs.logits shape: (1, num_classes, H/4, W/4)
-    logits = outputs.logits
-    # Upsample to original size
+    logits = outputs.logits  # (1, 150, H/4, W/4)
     upsampled = torch.nn.functional.interpolate(
         logits,
         size=(image.height, image.width),
@@ -77,13 +92,40 @@ def predict_wall_mask(image: Image.Image) -> np.ndarray:
         align_corners=False,
     )
 
-    # Softmax and extract wall class probability
     probs = torch.nn.functional.softmax(upsampled, dim=1)
+    probs_np = probs[0].cpu().numpy()  # (150, H, W)
+    argmax = probs_np.argmax(axis=0).astype(np.int32)  # (H, W)
 
-    # ADE20K: class 0 = "wall"
-    wall_prob = probs[0, ADE20K_WALL_CLASS].cpu().numpy()
+    wall_prob = probs_np[ADE20K_WALL]
+    floor_prob = probs_np[ADE20K_FLOOR]
+    ceiling_prob = probs_np[ADE20K_CEILING]
 
-    return wall_prob.astype(np.float32)
+    # Build exclusion mask: any pixel where excluded class has highest prob
+    exclude_mask = np.zeros((image.height, image.width), dtype=np.uint8)
+    for cls_idx in EXCLUDE_CLASSES:
+        exclude_mask[argmax == cls_idx] = 255
+
+    # Also exclude areas where floor/ceiling probability > 0.15
+    # even if not the argmax (catches transition zones)
+    exclude_mask[(floor_prob > 0.15) | (ceiling_prob > 0.15)] = 255
+
+    return {
+        "wall_prob": wall_prob.astype(np.float32),
+        "floor_prob": floor_prob.astype(np.float32),
+        "ceiling_prob": ceiling_prob.astype(np.float32),
+        "exclude_mask": exclude_mask,
+        "argmax": argmax,
+    }
+
+
+def predict_wall_mask(image: Image.Image) -> np.ndarray:
+    """Predict wall probability mask (backward-compatible).
+
+    Returns:
+        Wall probability mask as float32 numpy array [0..1]
+    """
+    result = predict_full(image)
+    return result["wall_prob"]
 
 
 def predict_wall_binary(
