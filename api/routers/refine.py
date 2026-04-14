@@ -158,9 +158,9 @@ async def refine_render(req: RefineRequest, request: Request):
         texture_img = _load_image(tex_path)
         logger.info("Texture loaded: %dx%d", texture_img.width, texture_img.height)
 
-        composite_part = _img_to_gemini_part(composite_img, max_dim=MAX_DIM)
-        original_part = _img_to_gemini_part(original_img, max_dim=MAX_DIM)
-        texture_part = _img_to_gemini_part(texture_img, max_dim=512)
+        composite_part = _img_to_gemini_part(composite_img, max_dim=768)
+        original_part = _img_to_gemini_part(original_img, max_dim=768)
+        texture_part = _img_to_gemini_part(texture_img, max_dim=384)
 
     except FileNotFoundError as exc:
         logger.error("File not found: %s", exc)
@@ -257,8 +257,32 @@ async def refine_render(req: RefineRequest, request: Request):
                     continue
                 last_error = "Nie udało się przetworzyć obrazów"
                 break
+
+            elif resp.status_code == 500:
+                # Google server error — log body, backoff, downscale
+                err_body = resp.text[:300] if resp.text else "no body"
+                logger.warning("Gemini 500 (attempt %d): %s", attempt + 1, err_body)
+                if attempt < 2:
+                    # Downscale for next attempt
+                    new_dim = 768 if attempt == 0 else 640
+                    composite_part = _img_to_gemini_part(composite_img, max_dim=new_dim)
+                    original_part = _img_to_gemini_part(original_img, max_dim=new_dim)
+                    payload["contents"][0]["parts"][1] = composite_part
+                    payload["contents"][0]["parts"][3] = original_part
+                    # On last retry, drop texture image (send only 2 images)
+                    if attempt == 1:
+                        # Remove texture part (index 5) and its label (index 4)
+                        payload["contents"][0]["parts"] = payload["contents"][0]["parts"][:4]
+                    last_error = f"Serwer Google — ponawiam z mniejszymi obrazami ({new_dim}px)…"
+                    await asyncio.sleep(2 * (attempt + 1))
+                    continue
+                last_error = "Serwer Google tymczasowo niedostępny — spróbuj za chwilę"
+                break
+
             else:
                 last_error = f"Błąd API (HTTP {resp.status_code})"
+                if attempt < 2:
+                    await asyncio.sleep(2)
                 continue
 
         except httpx.TimeoutException:
