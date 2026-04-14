@@ -309,50 +309,27 @@ def calibrate_scale(
                 bh, person_height_cm, ppc,
             )
 
-    # ── 6. EXTERIOR FALLBACK: detect if scene is outdoor ────────────────
-    # If no ceiling/floor detected → likely exterior
+    # ── 6. EXTERIOR: no ceiling/floor → selection = 300cm (one storey) ───
     is_exterior = (ceil_bottom is None and floor_top is None)
 
-    if not refs and is_exterior and box:
-        # For exterior: assume typical building storey = 300cm
-        # and the selection covers part of the facade
+    if is_exterior and box:
         box_h = box[3] - box[1]
-        # A full storey (floor-to-floor) = ~300cm
-        # If selection is roughly full image height, assume one storey
-        selection_ratio = box_h / h
-        if selection_ratio > 0.7:
-            # Selection covers most of the image — likely one storey
-            storey_cm = 300.0
-            ppc = float(box_h) / storey_cm
-            refs.append(ScaleRef(
-                name="exterior_storey",
-                height_px=box_h,
-                real_cm=storey_cm,
-                px_per_cm=ppc,
-                priority=5,
-            ))
-            logger.info(
-                "REF exterior storey: %dpx = %.0fcm → px/cm=%.3f",
-                box_h, storey_cm, ppc,
-            )
-        else:
-            # Partial facade — assume entire image ≈ 300cm storey
-            ppc = float(h) / 300.0
-            refs.append(ScaleRef(
-                name="exterior_image_height",
-                height_px=h,
-                real_cm=300.0,
-                px_per_cm=ppc,
-                priority=6,
-            ))
-            logger.info(
-                "REF exterior image: %dpx ≈ 300cm → px/cm=%.3f",
-                h, ppc,
-            )
+        storey_cm = 300.0
+        ppc = float(box_h) / storey_cm
+        refs.append(ScaleRef(
+            name="exterior_storey",
+            height_px=box_h,
+            real_cm=storey_cm,
+            px_per_cm=ppc,
+            priority=5,
+        ))
+        logger.info(
+            "EXTERIOR: selection %dpx = %.0fcm (one storey) → px/cm=%.3f",
+            box_h, storey_cm, ppc,
+        )
 
     # ── 7. ULTIMATE FALLBACK ────────────────────────────────────────────
     if not refs:
-        # Last resort: assume the full image shows ~270cm
         ppc = float(h) / CEILING_HEIGHT_CM
         refs.append(ScaleRef(
             name="image_height_fallback",
@@ -364,11 +341,9 @@ def calibrate_scale(
         logger.info("FALLBACK: image height %dpx ≈ %.0fcm → px/cm=%.3f", h, CEILING_HEIGHT_CM, ppc)
 
     # ── SELECT BEST REFERENCE ───────────────────────────────────────────
-    # Sort by priority (lower = better), take the best
     refs.sort(key=lambda r: r.priority)
     best = refs[0]
 
-    # If multiple refs at same priority, average them
     same_priority = [r for r in refs if r.priority == best.priority]
     if len(same_priority) > 1:
         px_per_cm = sum(r.px_per_cm for r in same_priority) / len(same_priority)
@@ -380,7 +355,6 @@ def calibrate_scale(
         px_per_cm = best.px_per_cm
 
     # ── SANITY CHECK ────────────────────────────────────────────────────
-    # With px_per_cm, an 8cm brick should be between 10px and 200px
     brick_8cm_px = px_per_cm * 8.0
     if brick_8cm_px < 5 or brick_8cm_px > 300:
         logger.warning(
@@ -401,10 +375,12 @@ def calibrate_scale(
 
     wall_height_cm = float(selection_height_px) / px_per_cm
 
+    # For exterior scenes, always enforce 300cm regardless of calculation
+    if is_exterior and best.name == "exterior_storey":
+        wall_height_cm = 300.0
+
     # Confidence
-    if best.priority <= 1:
-        confidence = "high"
-    elif best.priority <= 2:
+    if best.priority <= 2:
         confidence = "high"
     elif best.priority <= 5:
         confidence = "medium"
@@ -413,7 +389,6 @@ def calibrate_scale(
 
     method = best.name
 
-    # Build references list for logging
     references = []
     for r in refs:
         references.append({
@@ -427,10 +402,10 @@ def calibrate_scale(
         })
 
     logger.info(
-        "FINAL SCALE: px/cm=%.3f (method=%s, confidence=%s) "
-        "→ 8cm brick=%.0fpx, wall=%.0fcm, door(200cm)=%.0fpx",
-        px_per_cm, method, confidence,
-        px_per_cm * 8.0, wall_height_cm, px_per_cm * 200.0,
+        "FINAL SCALE: px/cm=%.3f (method=%s, confidence=%s, exterior=%s) "
+        "→ 8cm brick=%.0fpx, wall=%.0fcm",
+        px_per_cm, method, confidence, is_exterior,
+        px_per_cm * 8.0, wall_height_cm,
     )
 
     return {
