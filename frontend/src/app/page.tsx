@@ -387,6 +387,74 @@ export default function Home() {
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const [pipelineStages, setPipelineStages] = useState<PipelineStage[]>(INITIAL_STAGES);
 
+  // ── Refine (Gemini photorealistic render) ──
+  const [refining, setRefining] = useState(false);
+  const [refinedImage, setRefinedImage] = useState<string | null>(null);
+  const [refineError, setRefineError] = useState<string | null>(null);
+  const [refineMsg, setRefineMsg] = useState("");
+  const refineIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const REFINE_MESSAGES = [
+    "Analizowanie oświetlenia sceny…",
+    "Dopasowywanie cieni i odbić…",
+    "Wygładzanie krawędzi tekstury…",
+    "Korygowanie perspektywy…",
+    "Dodawanie realistycznych detali…",
+    "Optymalizowanie fotorealizmu…",
+    "Ulepszanie przejść kolorystycznych…",
+    "Finalizowanie renderingu…",
+  ];
+
+  const handleRefine = useCallback(async () => {
+    if (!renderData?.refined || !selectedProduct) return;
+    setRefining(true);
+    setRefineError(null);
+    setRefinedImage(null);
+    let msgIdx = 0;
+    setRefineMsg(REFINE_MESSAGES[0]);
+    refineIntervalRef.current = setInterval(() => {
+      msgIdx = (msgIdx + 1) % REFINE_MESSAGES.length;
+      setRefineMsg(REFINE_MESSAGES[msgIdx]);
+    }, 5000);
+
+    try {
+      const textureUrl = `/api/textures/${selectedProduct.productId}`;
+      const texResp = await fetch(textureUrl);
+      const texBlob = await texResp.blob();
+      const texB64 = await new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.readAsDataURL(texBlob);
+      });
+
+      const resp = await fetch("/api/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          composite: renderData.refined,
+          original: originalImageSrc || imageSrc,
+          texture: texB64,
+          product_name: selectedProduct.name,
+          material_type: selectedProduct.layoutType,
+        }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.text();
+        throw new Error(err);
+      }
+
+      const data = await resp.json();
+      setRefinedImage(data.image);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRefineError(msg);
+    } finally {
+      setRefining(false);
+      if (refineIntervalRef.current) clearInterval(refineIntervalRef.current);
+    }
+  }, [renderData, selectedProduct, originalImageSrc, imageSrc]);
+
 
   const fetchRemaining = useCallback(() => {
     fetch(`${API_BASE}/api/remaining-generations`)
@@ -484,6 +552,8 @@ export default function Home() {
     setStage("rendering");
     setPipelineError(null);
     setRenderData(null);
+    setRefinedImage(null);
+    setRefineError(null);
     setGenProgress("Przygotowywanie obrazu…");
     setPipelineStages(INITIAL_STAGES.map(s => ({ ...s, status: "pending" as const })));
 
@@ -989,6 +1059,52 @@ export default function Home() {
                         <div className="p-8 rounded-xl bg-stone-50 text-center">
                           <p className="text-sm text-stone-400">Brak danych</p>
                         </div>
+                      )}
+
+                      {/* Refine button / loading / result */}
+                      {refinedImage ? (
+                        <div className="flex flex-col gap-3">
+                          <div className="flex items-center gap-2 px-1">
+                            <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                            <p className="text-xs font-medium text-emerald-700">Fotorealistyczny render gotowy</p>
+                          </div>
+                          {resultTab === "compare" && (originalImageSrc || imageSrc) ? (
+                            <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={refinedImage} initialPosition={50} />
+                          ) : resultTab === "before" && (originalImageSrc || imageSrc) ? (
+                            <img src={originalImageSrc || imageSrc!} alt="Oryginał" className="rounded-xl w-full" />
+                          ) : (
+                            <img src={refinedImage} alt="Fotorealistyczny render" className="rounded-xl w-full" />
+                          )}
+                        </div>
+                      ) : refining ? (
+                        <div className="flex flex-col items-center gap-4 py-8 px-4">
+                          <div className="relative w-12 h-12">
+                            <div className="absolute inset-0 rounded-full border-2 border-stone-200" />
+                            <div className="absolute inset-0 rounded-full border-2 border-t-[#A01B1B] animate-spin" />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-sm font-medium text-stone-700 animate-pulse">{refineMsg}</p>
+                            <p className="text-[10px] text-stone-400 mt-1">Szacowany czas: ~45 sekund</p>
+                          </div>
+                          <div className="w-full max-w-xs bg-stone-100 rounded-full h-1.5 overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-[#A01B1B] to-[#c42b2b] rounded-full animate-progress" />
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={handleRefine}
+                          className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-stone-800 to-stone-900 text-white text-sm font-semibold hover:from-stone-700 hover:to-stone-800 transition-all duration-200 shadow-lg hover:shadow-xl cursor-pointer group"
+                        >
+                          <svg className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.455 2.456L21.75 6l-1.036.259a3.375 3.375 0 00-2.455 2.456z" />
+                          </svg>
+                          Fotorealistyczny render
+                        </button>
+                      )}
+
+                      {refineError && (
+                        <p className="text-xs text-red-500 px-1">{refineError}</p>
                       )}
 
                       {/* Product info */}

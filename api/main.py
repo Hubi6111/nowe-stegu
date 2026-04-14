@@ -21,7 +21,7 @@ for _key in ("TEXTURES_DIR", "DATA_DIR", "MODEL_CACHE_DIR"):
     if _val and not os.path.isabs(_val):
         os.environ[_key] = str(PROJECT_ROOT / _val)
 
-from routers import products, pipeline, admin  # noqa: E402
+from routers import products, pipeline, admin, refine  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,3 +66,4 @@ def health():
 app.include_router(products.router)
 app.include_router(pipeline.router)
 app.include_router(admin.router)
+app.include_router(refine.router)

@@ -111,3 +111,12 @@ html {
   animation: status-text-cycle 2.5s ease-in-out infinite;
 }
 
+/* ── Refine progress bar ── */
+@keyframes progress-sweep {
+  0%   { width: 0%; }
+  100% { width: 92%; }
+}
+
+.animate-progress {
+  animation: progress-sweep 45s cubic-bezier(0.25, 0.1, 0.25, 1) forwards;
+}

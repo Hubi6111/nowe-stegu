@@ -1,5 +1,19 @@
 [
   {
+    "id": "20260414-042639-3d5336",
+    "timestamp": "2026-04-14 04:26:39",
+    "client_ip": "127.0.0.1",
+    "product_id": "linea-comfort-oak",
+    "product_name": "Linea Comfort Oak",
+    "gemini_model": "deterministic",
+    "timings": {
+      "decode": 0.0,
+      "texture": 0.39,
+      "total": 0.41
+    },
+    "has_image": true
+  },
+  {
     "id": "20260414-042401-f99922",
     "timestamp": "2026-04-14 04:24:01",
     "client_ip": "127.0.0.1",
