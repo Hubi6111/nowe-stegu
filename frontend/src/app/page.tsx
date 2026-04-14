@@ -980,7 +980,7 @@ export default function Home() {
 
                       {/* Result content */}
                       {resultTab === "compare" && (originalImageSrc || imageSrc) && renderData.refined ? (
-                        <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} initialPosition={95} />
+                        <BeforeAfterSlider before={originalImageSrc || imageSrc!} after={renderData.refined} initialPosition={5} />
                       ) : resultTab === "after" && renderData.refined ? (
                         <img src={renderData.refined} alt="Po wizualizacji" className="rounded-xl w-full" />
                       ) : resultTab === "before" && (originalImageSrc || imageSrc) ? (
