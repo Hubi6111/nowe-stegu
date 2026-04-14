@@ -493,8 +493,8 @@ export default function Home() {
       const polygon = rectToPolygon(rectPts);
 
       // ── Stage 1: Smart wall mask via CV Engine ──
-      setPipelineStages(prev => prev.map(s => s.id === "mask" ? { ...s, status: "running", message: "Analizowanie ściany (SegFormer + SAM2 + GroundingDINO)…" } : s));
-      setGenProgress("Wykrywanie ściany…");
+      setPipelineStages(prev => prev.map(s => s.id === "mask" ? { ...s, status: "running", message: "Analizowanie ściany…" } : s));
+      setGenProgress("Analizowanie ściany…");
 
       let confirmedMask: string | null = null;
       let calibrationData: Record<string, unknown> | null = null;

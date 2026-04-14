@@ -202,7 +202,7 @@ async def remaining_generations(request: Request):
 
 @router.post("/api/smart-mask")
 async def smart_mask(req: DetectMaskRequest):
-    """Smart wall masking via CV Engine (SegFormer + SAM2 + GroundingDINO).
+    """Smart wall masking via CV Engine.
 
     Takes the same polygon selection as detect-mask, but calls cv-engine
     to produce a wall-only mask that excludes ceiling, floor, and foreground objects.
@@ -247,7 +247,7 @@ async def smart_mask(req: DetectMaskRequest):
             "final_mask": wall_mask_b64,
             "foreground_mask": fg_mask_b64,
             "mask_overlay": overlay_b64,
-            "wall_model": "cv-engine (SegFormer+SAM2+GDINO)",
+            "wall_model": "deterministic",
             "image_width": image.width,
             "image_height": image.height,
             "calibration": cv_result.get("calibration"),
@@ -420,7 +420,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
 
         # ── Stage 1: Decode inputs ────────────────────────────────────────
         yield _sse({"stage": "decode", "status": "running",
-                     "message": "Dekodowanie obrazu i maski…"})
+                     "message": "Przygotowywanie…"})
         try:
             image = decode_image(req.image)
             canvas_w = max(int(req.canvas_width), 1)
@@ -445,7 +445,7 @@ async def render_stream(req: RenderFinalRequest, request: Request):
         # ── Stage 2: Deterministic texture projection ─────────────────────
         t1 = time.time()
         yield _sse({"stage": "texture", "status": "running",
-                     "message": "Projekcja tekstury na ścianę…"})
+                     "message": "Tworzenie wizualizacji…"})
         try:
             meta, texture = load_product(req.product_id)
 

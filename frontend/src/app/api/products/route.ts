@@ -4,6 +4,15 @@ import path from "path";
 
 const DEFAULT_SHOP_URL = "https://stegu.pl/produkty/plytki-ceglopodobne/";
 
+const LAYOUT_TO_CATEGORY: Record<string, string> = {
+  "running-bond": "cegły",
+  "random-stone": "kamień",
+  "vertical-stack": "lamele",
+  "stack-bond": "cegły",
+  "flemish-bond": "cegły",
+  "herringbone": "cegły",
+};
+
 interface ProductMetadata {
   name: string;
   moduleWidthMm: number;
@@ -18,6 +27,7 @@ interface Product extends ProductMetadata {
   productId: string;
   textureImage: string;
   shopUrl: string;
+  category: string;
 }
 
 const REQUIRED_FIELDS: (keyof ProductMetadata)[] = [
@@ -94,6 +104,7 @@ export async function GET() {
         layoutType: raw.layoutType,
         offsetRatio: raw.offsetRatio,
         shopUrl: raw.shopUrl || DEFAULT_SHOP_URL,
+        category: LAYOUT_TO_CATEGORY[raw.layoutType] || "inne",
       });
     } catch {
       errors.push(`Invalid JSON in ${folder.name}/metadata.json`);
