@@ -40,11 +40,25 @@ def _decode_image(data_url: str) -> Image.Image:
     # Strip data URL prefix if present
     if "base64," in data_url:
         raw_b64 = data_url.split("base64,", 1)[1]
+    elif data_url.startswith("data:"):
+        # data URL without base64 marker — skip
+        raw_b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
     else:
         raw_b64 = data_url
 
+    # Clean up base64 string — remove whitespace and newlines
+    raw_b64 = raw_b64.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+
+    # Fix padding
+    padding = 4 - len(raw_b64) % 4
+    if padding != 4:
+        raw_b64 += "=" * padding
+
     raw_bytes = base64.b64decode(raw_b64)
-    return Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    logger.info("Decoded image: %d bytes (first 4: %s)", len(raw_bytes), raw_bytes[:4].hex())
+
+    img = Image.open(io.BytesIO(raw_bytes))
+    return img.convert("RGB")
 
 
 def _prepare_for_gemini(data_url: str, max_dim: int = MAX_DIM) -> dict:
