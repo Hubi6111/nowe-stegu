@@ -12,55 +12,18 @@ const STATUS_MESSAGES = [
   "Finalizuję wizualizację…",
 ];
 
-/* ── Brick wall layout ── */
-const WALL_ROWS = [
-  // Row 0 — full bricks
-  [
-    { w: 3, h: 1, x: 0, y: 0 },
-    { w: 3, h: 1, x: 3.2, y: 0 },
-    { w: 3, h: 1, x: 6.4, y: 0 },
-    { w: 3, h: 1, x: 9.6, y: 0 },
-  ],
-  // Row 1 — offset
-  [
-    { w: 1.5, h: 1, x: 0, y: 1.2 },
-    { w: 3,   h: 1, x: 1.7, y: 1.2 },
-    { w: 3,   h: 1, x: 4.9, y: 1.2 },
-    { w: 3,   h: 1, x: 8.1, y: 1.2 },
-    { w: 1.5, h: 1, x: 11.3, y: 1.2 },
-  ],
-  // Row 2 — full bricks
-  [
-    { w: 3, h: 1, x: 0, y: 2.4 },
-    { w: 3, h: 1, x: 3.2, y: 2.4 },
-    { w: 3, h: 1, x: 6.4, y: 2.4 },
-    { w: 3, h: 1, x: 9.6, y: 2.4 },
-  ],
-  // Row 3 — offset
-  [
-    { w: 1.5, h: 1, x: 0, y: 3.6 },
-    { w: 3,   h: 1, x: 1.7, y: 3.6 },
-    { w: 3,   h: 1, x: 4.9, y: 3.6 },
-    { w: 3,   h: 1, x: 8.1, y: 3.6 },
-    { w: 1.5, h: 1, x: 11.3, y: 3.6 },
-  ],
-  // Row 4 — full bricks
-  [
-    { w: 3, h: 1, x: 0, y: 4.8 },
-    { w: 3, h: 1, x: 3.2, y: 4.8 },
-    { w: 3, h: 1, x: 6.4, y: 4.8 },
-    { w: 3, h: 1, x: 9.6, y: 4.8 },
-  ],
+/* Brick-like grid: alternating rows with offset */
+const ROWS = [
+  [0, 1, 2, 3],       // 4 bricks
+  [4, 5, 6, 7, 8],    // 5 half-offset bricks
+  [9, 10, 11, 12],    // 4 bricks
+  [13, 14, 15, 16, 17], // 5 half-offset bricks
+  [18, 19, 20, 21],   // 4 bricks
 ];
-
-const ALL_BRICKS = WALL_ROWS.flat();
-const UNIT = 16; // px per unit
 
 export default function GeneratingOverlay() {
   const [msgIdx, setMsgIdx] = useState(0);
-  const [visibleCount, setVisibleCount] = useState(0);
 
-  // Cycle status messages
   useEffect(() => {
     const iv = setInterval(() => {
       setMsgIdx(prev => (prev + 1) % STATUS_MESSAGES.length);
@@ -68,51 +31,29 @@ export default function GeneratingOverlay() {
     return () => clearInterval(iv);
   }, []);
 
-  // Animate bricks appearing bottom-to-top
-  useEffect(() => {
-    if (visibleCount >= ALL_BRICKS.length) return;
-    const timeout = setTimeout(() => {
-      setVisibleCount(prev => prev + 1);
-    }, 180 + Math.random() * 120);
-    return () => clearTimeout(timeout);
-  }, [visibleCount]);
-
-  // Reverse order so bottom row appears first
-  const sortedBricks = [...ALL_BRICKS]
-    .map((b, i) => ({ ...b, idx: i }))
-    .sort((a, b) => b.y - a.y || a.x - b.x);
-
-  const wallWidth = 12.8 * UNIT;
-  const wallHeight = 5.8 * UNIT;
-
   return (
     <div className="animate-fade-in flex flex-col items-center gap-6 py-10 sm:py-16">
-      {/* Brick wall animation */}
-      <div
-        className="relative"
-        style={{ width: wallWidth, height: wallHeight }}
-      >
-        {sortedBricks.map((brick, sortIdx) => {
-          const isVisible = sortIdx < visibleCount;
-          return (
-            <div
-              key={brick.idx}
-              className="absolute rounded-[3px] transition-all"
-              style={{
-                left: brick.x * UNIT,
-                top: brick.y * UNIT,
-                width: brick.w * UNIT,
-                height: brick.h * UNIT,
-                backgroundColor: isVisible ? `hsl(${8 + (brick.idx % 5) * 3}, ${55 + (brick.idx % 3) * 10}%, ${42 + (brick.idx % 7) * 3}%)` : "transparent",
-                border: isVisible ? "1px solid hsl(30, 20%, 35%)" : "1px dashed hsl(30, 10%, 80%)",
-                opacity: isVisible ? 1 : 0.3,
-                transform: isVisible ? "translateY(0) scale(1)" : "translateY(8px) scale(0.9)",
-                transition: `all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) ${sortIdx * 0.02}s`,
-                boxShadow: isVisible ? "inset 0 1px 0 rgba(255,255,255,0.15), inset 0 -1px 0 rgba(0,0,0,0.15)" : "none",
-              }}
-            />
-          );
-        })}
+      {/* Brick grid animation */}
+      <div className="flex flex-col gap-[3px]">
+        {ROWS.map((row, rowIdx) => (
+          <div
+            key={rowIdx}
+            className="flex gap-[3px]"
+            style={{ paddingLeft: row.length === 5 ? 0 : 10 }}
+          >
+            {row.map((cellIdx) => (
+              <div
+                key={cellIdx}
+                className="rounded-[2px] grid-loading-cell"
+                style={{
+                  width: row.length === 5 ? 16 : 21,
+                  height: 10,
+                  animationDelay: `${cellIdx * 0.1}s`,
+                }}
+              />
+            ))}
+          </div>
+        ))}
       </div>
 
       {/* Status text */}
