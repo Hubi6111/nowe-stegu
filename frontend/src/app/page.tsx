@@ -234,6 +234,7 @@ export default function Home() {
   const [demoLoading, setDemoLoading] = useState<string | null>(null);
   const [selectedTexture, setSelectedTexture] = useState<TextureInfo | null>(null);
   const [resultImage, setResultImage] = useState<string | null>(null);
+  const [mobileTextureOpen, setMobileTextureOpen] = useState(false);
   const prevUrl = useRef<string | null>(null);
 
   const handleImageSelected = useCallback((objectUrl: string) => {
@@ -463,58 +464,89 @@ export default function Home() {
 
           {/* EDIT */}
           {stage === "edit" && (
-            <div className="animate-fade-in max-w-4xl mx-auto flex flex-col gap-4">
-              <div className="bg-white rounded-2xl border border-stone-200/80 shadow-sm overflow-hidden flex flex-col">
-                <div className="px-4 sm:px-5 py-3 border-b border-stone-100 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <h2 className="text-sm font-semibold text-stone-700">Zaznacz ścianę</h2>
-                    {wallDefined && (
-                      <span className="px-2 py-0.5 rounded-full bg-[#A01B1B]/10 text-[#A01B1B] text-[10px] font-semibold">Ściana zaznaczona</span>
+            <div className="animate-fade-in flex flex-col lg:flex-row gap-3 sm:gap-4">
+              {/* Left: image editor + generate button */}
+              <div className="flex-1 min-w-0 min-h-0 flex flex-col gap-3 sm:gap-4">
+                <div className="bg-white rounded-2xl border border-stone-200/80 shadow-sm overflow-hidden flex flex-col">
+                  <div className="px-4 sm:px-5 py-3 border-b border-stone-100 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <h2 className="text-sm font-semibold text-stone-700">Zaznacz ścianę</h2>
+                      {wallDefined && (
+                        <span className="px-2 py-0.5 rounded-full bg-[#A01B1B]/10 text-[#A01B1B] text-[10px] font-semibold">Ściana zaznaczona</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => { setImageSrc(null); setStage("upload"); }} className="text-[11px] text-stone-400 hover:text-stone-600 cursor-pointer transition-colors">Zmień zdjęcie</button>
+                      {/* Mobile: texture picker trigger */}
+                      <button
+                        type="button"
+                        onClick={() => setMobileTextureOpen(true)}
+                        className="lg:hidden flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-semibold text-[#A01B1B] bg-red-50 rounded-lg border border-red-200 cursor-pointer"
+                      >
+                        {selectedTexture ? selectedTexture.name : "Wybierz materiał"}
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="relative flex-1 min-h-0 overflow-y-auto p-2 sm:p-3" style={{ minHeight: "200px" }}>
+                    {imageSrc && (
+                      <ErrorBoundary>
+                        <p className="text-[11px] text-stone-400 mb-2.5">Narysuj prostokąt na ścianie — przeciągaj narożniki aby dopasować</p>
+                        <RectangleDrawer imageSrc={imageSrc} points={rectPts} onPointsChange={setRectPts} onStageSizeChange={handleStageSizeChange} />
+                      </ErrorBoundary>
                     )}
                   </div>
-                  <button type="button" onClick={() => { setImageSrc(null); setStage("upload"); }} className="text-[11px] text-stone-400 hover:text-stone-600 cursor-pointer transition-colors">Zmień zdjęcie</button>
                 </div>
-                <div className="relative flex-1 min-h-0 overflow-y-auto p-2 sm:p-3" style={{ minHeight: "200px" }}>
-                  {imageSrc && (
-                    <ErrorBoundary>
-                      <p className="text-[11px] text-stone-400 mb-2.5">Narysuj prostokąt na ścianie — przeciągaj narożniki aby dopasować</p>
-                      <RectangleDrawer imageSrc={imageSrc} points={rectPts} onPointsChange={setRectPts} onStageSizeChange={handleStageSizeChange} />
-                    </ErrorBoundary>
+
+                {/* Generate button + error */}
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+                  {wallDefined && selectedTexture ? (
+                    <button type="button" onClick={handleGenerate}
+                      className="px-5 sm:px-7 py-2.5 text-xs sm:text-sm font-semibold text-white bg-[#A01B1B] rounded-xl hover:bg-[#8A1717] shadow-sm transition-all hover:shadow-md cursor-pointer flex items-center gap-2 flex-1 sm:flex-none justify-center">
+                      <IconSparkle /> Generuj wizualizację
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-stone-400">
+                      {!wallDefined ? "Narysuj prostokąt na zdjęciu aby zaznaczyć ścianę" : "Wybierz teksturę z listy obok"}
+                    </p>
+                  )}
+                  {selectedTexture && (
+                    <div className="flex items-center gap-2 ml-auto lg:hidden">
+                      <img src={selectedTexture.albedoUrl} alt="" className="w-8 h-8 rounded-lg border border-stone-200 object-cover" />
+                      <span className="text-[11px] font-medium text-stone-600">{selectedTexture.name}</span>
+                    </div>
                   )}
                 </div>
-              </div>
 
-              {/* Texture picker */}
-              <div className="bg-white rounded-2xl border border-stone-200/80 shadow-sm overflow-hidden p-3 sm:p-4">
-                <TexturePicker selected={selectedTexture} onSelect={setSelectedTexture} />
-              </div>
-
-              {/* Generate button + error */}
-              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                {wallDefined && selectedTexture ? (
-                  <button type="button" onClick={handleGenerate}
-                    className="px-5 sm:px-7 py-2.5 text-xs sm:text-sm font-semibold text-white bg-[#A01B1B] rounded-xl hover:bg-[#8A1717] shadow-sm transition-all hover:shadow-md cursor-pointer flex items-center gap-2 flex-1 sm:flex-none justify-center">
-                    <IconSparkle /> Generuj wizualizację
-                  </button>
-                ) : (
-                  <p className="text-[11px] text-stone-400">
-                    {!wallDefined ? "Narysuj prostokąt na zdjęciu aby zaznaczyć ścianę" : "Wybierz teksturę z listy powyżej"}
-                  </p>
-                )}
-                {selectedTexture && (
-                  <div className="flex items-center gap-2 ml-auto">
-                    <img src={selectedTexture.albedoUrl} alt="" className="w-8 h-8 rounded-lg border border-stone-200 object-cover" />
-                    <span className="text-[11px] font-medium text-stone-600">{selectedTexture.name}</span>
+                {error && (
+                  <div className="flex items-center gap-3 w-full bg-red-50 border border-red-200 rounded-xl px-4 py-3 animate-fade-in">
+                    <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                    <p className="text-xs text-red-700 flex-1">{error}</p>
                   </div>
                 )}
               </div>
 
-              {error && (
-                <div className="flex items-center gap-3 w-full bg-red-50 border border-red-200 rounded-xl px-4 py-3 animate-fade-in">
-                  <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-                  <p className="text-xs text-red-700 flex-1">{error}</p>
+              {/* Right: texture sidebar (desktop only) */}
+              <div className="hidden lg:flex flex-col w-64 xl:w-72 shrink-0 min-h-0">
+                <div className="bg-white rounded-2xl border border-stone-200/80 shadow-sm flex flex-col min-h-0 flex-1">
+                  <div className="px-4 py-4 border-b border-stone-100">
+                    <h3 className="text-sm font-semibold text-stone-700">Materiały dekoracyjne</h3>
+                    <p className="text-[11px] text-stone-400 mt-0.5">Wybierz produkt do wizualizacji</p>
+                    {selectedTexture && (
+                      <div className="flex items-center gap-2 mt-2.5 px-2.5 py-2 bg-[#A01B1B]/5 rounded-lg border border-[#A01B1B]/15">
+                        <img src={selectedTexture.albedoUrl} alt="" className="w-8 h-8 rounded-md object-cover" />
+                        <div>
+                          <p className="text-xs font-semibold text-[#A01B1B]">{selectedTexture.name}</p>
+                          <p className="text-[10px] text-stone-400">{selectedTexture.materialType}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-3 flex-1 overflow-y-auto min-h-0">
+                    <TexturePicker selected={selectedTexture} onSelect={setSelectedTexture} />
+                  </div>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
@@ -592,6 +624,27 @@ export default function Home() {
           )}
         </div>
       </main>
+
+      {/* Mobile texture picker bottom sheet */}
+      {mobileTextureOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setMobileTextureOpen(false)} />
+          <div className="absolute bottom-0 inset-x-0 bg-white rounded-t-3xl shadow-2xl max-h-[75vh] flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-stone-100">
+              <div>
+                <h3 className="text-sm font-semibold text-stone-700">Materiały dekoracyjne</h3>
+                <p className="text-[11px] text-stone-400">Wybierz produkt do wizualizacji</p>
+              </div>
+              <button onClick={() => setMobileTextureOpen(false)} className="w-9 h-9 rounded-full bg-stone-100 flex items-center justify-center cursor-pointer hover:bg-stone-200 transition-colors">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              <TexturePicker selected={selectedTexture} onSelect={(tex) => { setSelectedTexture(tex); setMobileTextureOpen(false); }} />
+            </div>
+          </div>
+        </div>
+      )}
 
       <footer className="border-t border-stone-200/60 py-2 sm:py-2.5 bg-white shrink-0">
         <div className="max-w-[1440px] mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between">
