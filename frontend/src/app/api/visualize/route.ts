@@ -66,7 +66,7 @@ OUTPUT: Return ONLY the image. Same dimensions as COMPOSITE. No text, no explana
 
     const contentRequest = {
       contents: [{
-        role: "user" as const,
+        role: "user",
         parts: [
           { text: prompt },
           { inlineData: { mimeType: roomImg.mimeType, data: roomImg.data } },
@@ -74,7 +74,7 @@ OUTPUT: Return ONLY the image. Same dimensions as COMPOSITE. No text, no explana
         ],
       }],
       config: {
-        responseModalities: ["TEXT", "IMAGE"] as const,
+        responseModalities: ["TEXT", "IMAGE"],
         temperature: 0.0,
       },
     };
