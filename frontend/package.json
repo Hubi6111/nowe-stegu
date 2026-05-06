@@ -3,18 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@google/genai": "^1.51.0",
     "konva": "^9.3.18",
     "next": "^15.3.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-konva": "^19.2.3",
-    "sharp": "^0.34.5"
+    "react-konva": "^19.2.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.3",
