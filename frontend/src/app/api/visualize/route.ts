@@ -1,12 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
-const GEMINI_MODEL = "gemini-2.5-flash-image";
+/**
+ * Models ordered from best to worst for image refinement tasks.
+ * On 503 (overloaded) errors, we try the next model in line.
+ */
+const MODEL_FALLBACK_CHAIN = [
+  "gemini-2.5-flash-image",          // Best: fast, high quality image gen
+  "gemini-3-pro-image-preview",      // Pro quality, may be slower
+  "gemini-3.1-flash-image-preview",  // Fast alternative
+  "gemini-2.0-flash-exp",            // Legacy fallback
+];
 
 function stripDataUrl(base64: string): { data: string; mimeType: string } {
   const match = base64.match(/^data:([^;]+);base64,(.+)$/);
   if (match) return { mimeType: match[1], data: match[2] };
   return { mimeType: "image/jpeg", data: base64 };
+}
+
+function isRetryableError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message || "";
+  // 503 UNAVAILABLE, 429 RESOURCE_EXHAUSTED, overloaded
+  return msg.includes("503") || msg.includes("UNAVAILABLE") || msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("overloaded");
 }
 
 export async function POST(req: NextRequest) {
@@ -48,10 +64,9 @@ OUTPUT: Return ONLY the image. Same dimensions as COMPOSITE. No text, no explana
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const response = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const contentRequest = {
       contents: [{
-        role: "user",
+        role: "user" as const,
         parts: [
           { text: prompt },
           { inlineData: { mimeType: roomImg.mimeType, data: roomImg.data } },
@@ -59,39 +74,72 @@ OUTPUT: Return ONLY the image. Same dimensions as COMPOSITE. No text, no explana
         ],
       }],
       config: {
-        responseModalities: ["TEXT", "IMAGE"],
+        responseModalities: ["TEXT", "IMAGE"] as const,
         temperature: 0.0,
       },
-    });
+    };
 
-    const candidates = response.candidates;
-    if (!candidates || candidates.length === 0) {
-      return NextResponse.json({ error: "No response from Gemini model" }, { status: 500 });
-    }
+    // Try each model in the fallback chain
+    let lastError: unknown = null;
+    for (const model of MODEL_FALLBACK_CHAIN) {
+      try {
+        console.log(`[Visualize] Trying model: ${model}`);
+        const response = await ai.models.generateContent({
+          model,
+          ...contentRequest,
+        });
 
-    const resParts = candidates[0].content?.parts || [];
-    let resultImageBase64: string | null = null;
-    let resultMimeType = "image/png";
-    let textResponse = "";
+        const candidates = response.candidates;
+        if (!candidates || candidates.length === 0) {
+          console.warn(`[Visualize] ${model}: No candidates returned, trying next…`);
+          continue;
+        }
 
-    for (const part of resParts) {
-      if (part.text) textResponse += part.text;
-      else if (part.inlineData) {
-        resultImageBase64 = part.inlineData.data || null;
-        resultMimeType = part.inlineData.mimeType || "image/png";
+        const resParts = candidates[0].content?.parts || [];
+        let resultImageBase64: string | null = null;
+        let resultMimeType = "image/png";
+        let textResponse = "";
+
+        for (const part of resParts) {
+          if (part.text) textResponse += part.text;
+          else if (part.inlineData) {
+            resultImageBase64 = part.inlineData.data || null;
+            resultMimeType = part.inlineData.mimeType || "image/png";
+          }
+        }
+
+        if (!resultImageBase64) {
+          console.warn(`[Visualize] ${model}: No image in response, trying next…`);
+          continue;
+        }
+
+        console.log(`[Visualize] Success with model: ${model}`);
+        return NextResponse.json({
+          image: `data:${resultMimeType};base64,${resultImageBase64}`,
+          text: textResponse,
+          model,
+        });
+      } catch (err: unknown) {
+        lastError = err;
+        const errMsg = err instanceof Error ? err.message : String(err);
+        console.warn(`[Visualize] ${model} failed: ${errMsg.substring(0, 200)}`);
+
+        if (isRetryableError(err)) {
+          console.log(`[Visualize] Retryable error, trying next model…`);
+          continue;
+        }
+
+        // Non-retryable error — stop trying
+        throw err;
       }
     }
 
-    if (!resultImageBase64) {
-      return NextResponse.json({
-        error: "Gemini nie zwrócił obrazu. " + (textResponse || "Spróbuj ponownie."),
-      }, { status: 500 });
-    }
-
+    // All models failed
+    const fallbackMsg = lastError instanceof Error ? lastError.message : "All models unavailable";
+    console.error(`[Visualize] All ${MODEL_FALLBACK_CHAIN.length} models failed. Last error: ${fallbackMsg}`);
     return NextResponse.json({
-      image: `data:${resultMimeType};base64,${resultImageBase64}`,
-      text: textResponse,
-    });
+      error: `Wszystkie modele AI są przeciążone. Spróbuj ponownie za chwilę. (${fallbackMsg.substring(0, 100)})`,
+    }, { status: 503 });
   } catch (err: unknown) {
     console.error("Visualize API error:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
