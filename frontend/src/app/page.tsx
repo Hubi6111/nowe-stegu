@@ -24,6 +24,8 @@ const DEMO_ROOMS = [
 
 function IconRefresh() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg>; }
 function IconSparkle() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74L12 2z" /></svg>; }
+function IconCart() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" /></svg>; }
+function IconDownload() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>; }
 
 const STEPS = [
   { n: 1, label: "Zdjęcie" },
@@ -270,6 +272,26 @@ export default function Home() {
 
   const handleStageSizeChange = useCallback((size: { width: number; height: number }) => setStageSizeState(size), []);
   const wallDefined = rectPts.length >= 2;
+
+  // "Dodaj kolejny materiał" — use the result image as new input for another round
+  const handleUseResultAsInput = useCallback(() => {
+    if (!resultImage) return;
+    // Convert data URL to blob and use it as new image source
+    fetch(resultImage)
+      .then(r => r.blob())
+      .then(blob => {
+        const objectUrl = URL.createObjectURL(blob);
+        if (prevUrl.current) URL.revokeObjectURL(prevUrl.current);
+        prevUrl.current = objectUrl;
+        setImageSrc(objectUrl);
+        setOriginalImageBase64(resultImage);
+        setRectPts([]);
+        setSelectedTexture(null);
+        setResultImage(null);
+        setStage("edit");
+        setError(null);
+      });
+  }, [resultImage]);
 
   const handleGenerate = useCallback(async () => {
     if (!imageSrc || !wallDefined || !stageSize || !selectedTexture) return;
@@ -528,22 +550,42 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="px-3 sm:px-5 py-3 border-t border-stone-100 flex flex-wrap items-center gap-2 sm:gap-3 bg-stone-50/50">
-                  <button type="button" onClick={() => { setRectPts([]); setResultImage(null); setStage("edit"); setError(null); }}
-                    className="px-4 py-2 text-xs font-medium text-stone-500 border border-stone-200 rounded-xl hover:bg-stone-50 transition-all cursor-pointer flex items-center gap-2">
-                    <IconRefresh /> Zmień zaznaczenie
-                  </button>
-                  <button type="button" onClick={resetAll} className="px-3 py-2 text-xs text-stone-400 hover:text-stone-600 cursor-pointer transition-colors">
-                    Nowe zdjęcie
-                  </button>
-                  {/* Download */}
-                  <a href={resultImage} download="stegu-wizualizacja.png"
-                    className="ml-auto px-4 py-2 text-xs font-semibold text-white bg-[#A01B1B] rounded-xl hover:bg-[#8A1717] shadow-sm transition-all cursor-pointer flex items-center gap-2">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
-                    </svg>
-                    Pobierz
-                  </a>
+                <div className="px-3 sm:px-5 py-3 border-t border-stone-100 flex flex-col gap-3 bg-stone-50/50">
+                  {/* Primary row — order + download */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedTexture && (
+                      <a
+                        href={selectedTexture.shopUrl || "https://stegu.pl/produkty/"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-5 py-2.5 text-xs sm:text-sm font-semibold text-white bg-[#A01B1B] rounded-xl hover:bg-[#8A1717] shadow-sm transition-all cursor-pointer flex items-center gap-2"
+                      >
+                        <IconCart />
+                        <span className="hidden sm:inline">Podoba się? Zamów produkt</span>
+                        <span className="sm:hidden">Zamów produkt</span>
+                      </a>
+                    )}
+                    <a href={resultImage} download="stegu-wizualizacja.png"
+                      className="px-4 py-2.5 text-xs sm:text-sm font-medium text-stone-700 border border-stone-300 rounded-xl hover:bg-stone-50 transition-all cursor-pointer flex items-center gap-2">
+                      <IconDownload />
+                      Pobierz wizualizację
+                    </a>
+                  </div>
+                  {/* Secondary row — add material + change selection */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleUseResultAsInput}
+                      className="px-4 py-2 text-xs font-medium text-stone-500 border border-stone-200 rounded-xl hover:bg-stone-50 transition-all cursor-pointer flex items-center gap-2"
+                    >
+                      <IconRefresh />
+                      Dodaj kolejny materiał
+                    </button>
+                    <button type="button" onClick={() => { setRectPts([]); setResultImage(null); setStage("edit"); setError(null); }}
+                      className="px-3 py-2 text-xs text-stone-400 hover:text-stone-600 cursor-pointer transition-colors">
+                      Zmień zaznaczenie
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
