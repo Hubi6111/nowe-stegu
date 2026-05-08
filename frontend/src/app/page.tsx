@@ -24,8 +24,6 @@ const DEMO_ROOMS = [
 
 function IconRefresh() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 102.13-9.36L1 10" /></svg>; }
 function IconSparkle() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l2.09 6.26L20 10l-5.91 1.74L12 18l-2.09-6.26L4 10l5.91-1.74L12 2z" /></svg>; }
-function IconCart() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" /><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6" /></svg>; }
-function IconDownload() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>; }
 
 const STEPS = [
   { n: 1, label: "Zdjęcie" },
@@ -170,15 +168,23 @@ async function createTiledTexture(
   const albedoH = img.naturalHeight;
   const albedoAspect = albedoW / albedoH;
 
-  // Determine real-world dimensions of one albedo tile
+  // Determine real-world dimensions of one albedo tile image.
+  // The albedo image is a seamless tile that must be repeated without
+  // stretching — we need its exact real-world footprint.
   let tileRealW: number;
   let tileRealH: number;
 
   if (tex.tileRealHeightMm && tex.tileRealWidthMm) {
-    // Best case: exact tile dimensions specified
+    // Best case: both exact tile dimensions specified
     tileRealW = tex.tileRealWidthMm;
     tileRealH = tex.tileRealHeightMm;
+  } else if (tex.tileRealHeightMm && !tex.tileRealWidthMm) {
+    // Only height specified — derive width from albedo aspect ratio
+    // This keeps the tile proportional to the source image
+    tileRealH = tex.tileRealHeightMm;
+    tileRealW = tileRealH * albedoAspect;
   } else if (tex.tileWidthMm && tex.tileHeightMm) {
+    // Tile dimensions from metadata (the pixel area the texture covers)
     tileRealW = tex.tileWidthMm;
     tileRealH = tex.tileHeightMm;
   } else if (tex.moduleWidthMm && tex.moduleHeightMm) {
@@ -188,7 +194,7 @@ async function createTiledTexture(
     tileRealH = courses * (tex.moduleHeightMm + joint);
     tileRealW = tileRealH * albedoAspect;
   } else {
-    // Fallback: assume tile covers ~500mm
+    // Fallback: assume tile covers ~500mm height
     tileRealH = 500;
     tileRealW = 500 * albedoAspect;
   }
@@ -201,14 +207,28 @@ async function createTiledTexture(
   // Convert real mm to pixels on the wall canvas
   // mmPerPixel = how many mm each pixel of the wall represents
   const mmPerPixel = ASSUMED_WALL_HEIGHT_MM / wallHeightPx;
-  const tilePxW = tileRealW / mmPerPixel;
-  const tilePxH = tileRealH / mmPerPixel;
+  const tilePxW = Math.round(tileRealW / mmPerPixel);
+  const tilePxH = Math.round(tileRealH / mmPerPixel);
 
-  // Create canvas and tile
+  // Prevent degenerate tiles
+  if (tilePxW < 1 || tilePxH < 1) {
+    // Fallback: stretch single tile to fill
+    const canvas = document.createElement("canvas");
+    canvas.width = wallWidthPx;
+    canvas.height = wallHeightPx;
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0, wallWidthPx, wallHeightPx);
+    return canvas.toDataURL("image/jpeg", 0.92);
+  }
+
+  // Create canvas and tile — use integer pixel positions to avoid
+  // sub-pixel gaps/overlaps that cause visible seam lines
   const canvas = document.createElement("canvas");
   canvas.width = wallWidthPx;
   canvas.height = wallHeightPx;
   const ctx = canvas.getContext("2d")!;
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 
   const cols = Math.ceil(wallWidthPx / tilePxW) + 1;
   const rows = Math.ceil(wallHeightPx / tilePxH) + 1;
@@ -274,26 +294,6 @@ export default function Home() {
   const handleStageSizeChange = useCallback((size: { width: number; height: number }) => setStageSizeState(size), []);
   const wallDefined = rectPts.length >= 2;
 
-  // "Dodaj kolejny materiał" — use the result image as new input for another round
-  const handleUseResultAsInput = useCallback(() => {
-    if (!resultImage) return;
-    // Convert data URL to blob and use it as new image source
-    fetch(resultImage)
-      .then(r => r.blob())
-      .then(blob => {
-        const objectUrl = URL.createObjectURL(blob);
-        if (prevUrl.current) URL.revokeObjectURL(prevUrl.current);
-        prevUrl.current = objectUrl;
-        setImageSrc(objectUrl);
-        setOriginalImageBase64(resultImage);
-        setRectPts([]);
-        setSelectedTexture(null);
-        setResultImage(null);
-        setStage("edit");
-        setError(null);
-      });
-  }, [resultImage]);
-
   const handleGenerate = useCallback(async () => {
     if (!imageSrc || !wallDefined || !stageSize || !selectedTexture) return;
     setError(null);
@@ -329,6 +329,15 @@ export default function Home() {
         selectedTexture,
       );
 
+      // Load raw albedo texture and convert to base64 for the render model
+      const albedoImg = await loadImage(selectedTexture.albedoUrl);
+      const albedoCanvas = document.createElement("canvas");
+      albedoCanvas.width = albedoImg.naturalWidth;
+      albedoCanvas.height = albedoImg.naturalHeight;
+      const albedoCtx = albedoCanvas.getContext("2d")!;
+      albedoCtx.drawImage(albedoImg, 0, 0);
+      const textureImageBase64 = albedoCanvas.toDataURL("image/jpeg", 0.92);
+
       // ── Client-side composite: paste tiled texture onto room within exact mask ──
       const tiledImg = await loadImage(tiledTextureBase64);
       const compositeCanvas = document.createElement("canvas");
@@ -349,7 +358,7 @@ export default function Home() {
 
       const compositeBase64 = compositeCanvas.toDataURL("image/jpeg", 0.92);
 
-      // Call API with pre-composited image
+      // Call API with pre-composited image + raw texture for two-stage pipeline
       const resp = await fetch("/api/visualize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -357,6 +366,7 @@ export default function Home() {
           roomImageBase64: roomBase64,
           compositeImageBase64: compositeBase64,
           maskImageBase64: maskBase64,
+          textureImageBase64: textureImageBase64,
           textureName: selectedTexture.name,
           textureDescription: selectedTexture.surfaceDescription || "",
           materialType: selectedTexture.materialType || "",
@@ -446,7 +456,7 @@ export default function Home() {
                 {[
                   { title: "Wgraj zdjęcie", desc: "Własne lub z przykładów", num: "1" },
                   { title: "Zaznacz ścianę", desc: "Wybierz produkt Stegu", num: "2" },
-                  { title: "Wizualizacja AI", desc: "Gemini generuje wynik", num: "3" },
+                  { title: "Wizualizacja AI", desc: "AI generuje wynik", num: "3" },
                 ].map(({ title, desc, num }) => (
                   <div key={num} className="flex gap-2 items-start p-3 rounded-xl bg-white border border-stone-200/80">
                     <div className="w-6 h-6 rounded-md bg-[#A01B1B]/10 flex items-center justify-center shrink-0 mt-0.5">
@@ -582,42 +592,22 @@ export default function Home() {
                   )}
                 </div>
 
-                <div className="px-3 sm:px-5 py-3 border-t border-stone-100 flex flex-col gap-3 bg-stone-50/50">
-                  {/* Primary row — order + download */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    {selectedTexture && (
-                      <a
-                        href={selectedTexture.shopUrl || "https://stegu.pl/produkty/"}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="px-5 py-2.5 text-xs sm:text-sm font-semibold text-white bg-[#A01B1B] rounded-xl hover:bg-[#8A1717] shadow-sm transition-all cursor-pointer flex items-center gap-2"
-                      >
-                        <IconCart />
-                        <span className="hidden sm:inline">Podoba się? Zamów produkt</span>
-                        <span className="sm:hidden">Zamów produkt</span>
-                      </a>
-                    )}
-                    <a href={resultImage} download="stegu-wizualizacja.png"
-                      className="px-4 py-2.5 text-xs sm:text-sm font-medium text-stone-700 border border-stone-300 rounded-xl hover:bg-stone-50 transition-all cursor-pointer flex items-center gap-2">
-                      <IconDownload />
-                      Pobierz wizualizację
-                    </a>
-                  </div>
-                  {/* Secondary row — add material + change selection */}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleUseResultAsInput}
-                      className="px-4 py-2 text-xs font-medium text-stone-500 border border-stone-200 rounded-xl hover:bg-stone-50 transition-all cursor-pointer flex items-center gap-2"
-                    >
-                      <IconRefresh />
-                      Dodaj kolejny materiał
-                    </button>
-                    <button type="button" onClick={() => { setRectPts([]); setResultImage(null); setStage("edit"); setError(null); }}
-                      className="px-3 py-2 text-xs text-stone-400 hover:text-stone-600 cursor-pointer transition-colors">
-                      Zmień zaznaczenie
-                    </button>
-                  </div>
+                <div className="px-3 sm:px-5 py-3 border-t border-stone-100 flex flex-wrap items-center gap-2 sm:gap-3 bg-stone-50/50">
+                  <button type="button" onClick={() => { setRectPts([]); setResultImage(null); setStage("edit"); setError(null); }}
+                    className="px-4 py-2 text-xs font-medium text-stone-500 border border-stone-200 rounded-xl hover:bg-stone-50 transition-all cursor-pointer flex items-center gap-2">
+                    <IconRefresh /> Zmień zaznaczenie
+                  </button>
+                  <button type="button" onClick={resetAll} className="px-3 py-2 text-xs text-stone-400 hover:text-stone-600 cursor-pointer transition-colors">
+                    Nowe zdjęcie
+                  </button>
+                  {/* Download */}
+                  <a href={resultImage} download="stegu-wizualizacja.png"
+                    className="ml-auto px-4 py-2 text-xs font-semibold text-white bg-[#A01B1B] rounded-xl hover:bg-[#8A1717] shadow-sm transition-all cursor-pointer flex items-center gap-2">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+                    </svg>
+                    Pobierz
+                  </a>
                 </div>
               </div>
             </div>
@@ -648,7 +638,7 @@ export default function Home() {
 
       <footer className="border-t border-stone-200/60 py-2 sm:py-2.5 bg-white shrink-0">
         <div className="max-w-[1440px] mx-auto px-3 sm:px-6 lg:px-8 flex items-center justify-between">
-          <p className="text-[9px] text-stone-400 tracking-wide">Stegu Visualizer · Kamień dekoracyjny i cegła · Powered by Gemini AI</p>
+          <p className="text-[9px] text-stone-400 tracking-wide">Stegu Visualizer · Kamień dekoracyjny i cegła</p>
         </div>
       </footer>
     </div>
